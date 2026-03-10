@@ -2,6 +2,37 @@
 
 本文档只描述当前版本真实可用的公开 API。
 
+## 安装
+
+### Gradle (Kotlin DSL)
+
+```kotlin
+repositories {
+    maven("https://maven.wcpe.top/repository/maven-public/")
+}
+
+dependencies {
+    compileOnly("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+}
+```
+
+### Maven
+
+```xml
+<repository>
+    <id>wcpe</id>
+    <url>https://maven.wcpe.top/repository/maven-public/</url>
+</repository>
+
+<dependency>
+    <groupId>top.wcpe.taboolib.ioc</groupId>
+    <artifactId>taboolib-ioc</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <scope>provided</scope>
+</dependency>
+```
+
+
 ## 注解
 
 ### `@Component`

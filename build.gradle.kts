@@ -1,6 +1,7 @@
 import io.izzel.taboolib.gradle.*
 
 plugins {
+    java
     id("io.izzel.taboolib") version "2.0.28" apply false
     kotlin("jvm") version "2.1.0" apply false
 }
@@ -33,6 +34,10 @@ subprojects {
         options.encoding = "UTF-8"
         sourceCompatibility = "1.8"
         targetCompatibility = "1.8"
+    }
+    java {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {

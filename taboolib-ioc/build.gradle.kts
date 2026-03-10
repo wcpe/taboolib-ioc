@@ -29,13 +29,15 @@ publishing {
             val snapshotsRepoUrl = uri("https://maven.wcpe.top/repository/maven-snapshots/")
             url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
         }
+        mavenLocal()
     }
     publications {
         create<MavenPublication>("maven") {
             groupId = "top.wcpe.taboolib.ioc"
             artifactId = "taboolib-ioc"
-            version = "1.0.0-SNAPSHOT"
+            version = "${project.version}"
             from(components["java"])
+            println("> Apply \"$groupId:$artifactId:$version\"")
         }
     }
 }
