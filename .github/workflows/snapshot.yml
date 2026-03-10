@@ -1,0 +1,117 @@
+name: Snapshot Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    name: Build & Publish SNAPSHOT
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. 检出完整历史 ──────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. 解析构建元信息 ────────────────────────────────────────────────
+      - name: Resolve build info
+        id: info
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +"%Y%m%d")
+          # 从 gradle.properties 读取基础版本，去掉 -SNAPSHOT 后缀
+          BASE_VERSION=$(grep '^version=' gradle.properties | cut -d= -f2 | sed 's/-SNAPSHOT//')
+          SNAP_VERSION="${BASE_VERSION}-SNAPSHOT+${DATE}.${SHORT_SHA}"
+          echo "snap_version=${SNAP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}"       >> "$GITHUB_OUTPUT"
+          echo "date=${DATE}"                 >> "$GITHUB_OUTPUT"
+          echo "Snapshot version: ${SNAP_VERSION}"
+
+      # ── 3. 写入版本号 ────────────────────────────────────────────────────
+      - name: Set version in gradle.properties
+        run: |
+          sed -i "s/^version=.*/version=${{ steps.info.outputs.snap_version }}/" gradle.properties
+
+      # ── 4. 配置 JDK ─────────────────────────────────────────────────────
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      # ── 5. 配置 Gradle（含缓存）─────────────────────────────────────────
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # ── 5.5. 修复 Linux 下 gradlew 执行权限 ─────────────────────────────
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # ── 6. 构建 ──────────────────────────────────────────────────────────
+      - name: Build
+        run: ./gradlew build -x test --no-daemon
+
+      # ── 7. 收集产物 ──────────────────────────────────────────────────────
+      - name: Collect artifacts
+        id: artifacts
+        run: |
+          MAIN_JAR=$(ls build/libs/*.jar | grep -v '\-sources\.\|plain\.' | head -n 1)
+          echo "main_jar=${MAIN_JAR}" >> "$GITHUB_OUTPUT"
+          echo "Found artifact: ${MAIN_JAR}"
+
+      # ── 8. 生成更新日志（最近 20 条提交）────────────────────────────────
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | head -n 1)
+          if [ -z "${PREV_TAG}" ]; then
+            RANGE="HEAD"
+            SINCE_DESC="（自初始提交以来）"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+            SINCE_DESC="（自 \`${PREV_TAG}\` 以来）"
+          fi
+
+          COMMITS=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | head -n 20 || true)
+          EXTRA=$(git log ${RANGE} --oneline -- | wc -l | tr -d ' ')
+
+          {
+            echo "## ⚠️ 这是自动构建的 SNAPSHOT 版本，非正式发布"
+            echo ""
+            echo "> 构建时间：\`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`"
+            echo "> Commit：[\`${{ steps.info.outputs.short_sha }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
+            echo "> 版本号：\`${{ steps.info.outputs.snap_version }}\`"
+            echo ""
+            echo "## 最近提交 ${SINCE_DESC}"
+            echo ""
+            if [ -n "${COMMITS}" ]; then
+              echo "${COMMITS}"
+              [ "${EXTRA}" -gt 20 ] && echo "" && echo "_…及更多 $(( EXTRA - 20 )) 条提交_"
+            else
+              echo "_（无新提交）_"
+            fi
+          } > SNAPSHOT_BODY.md
+
+          cat SNAPSHOT_BODY.md
+
+      # ── 9. 覆盖发布同一个 SNAPSHOT Release ─────────────────────────────
+      - name: Publish SNAPSHOT Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: SNAPSHOT
+          name: "SNAPSHOT — ${{ steps.info.outputs.snap_version }}"
+          body_path: SNAPSHOT_BODY.md
+          draft: false
+          prerelease: true
+          # 覆盖旧产物：删掉同名文件后重新上传
+          files: ${{ steps.artifacts.outputs.main_jar }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

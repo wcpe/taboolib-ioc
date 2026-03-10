@@ -1,0 +1,61 @@
+package top.wcpe.taboolib.ioc.example.service
+
+import taboolib.common.platform.function.info
+import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.annotation.Named
+import top.wcpe.taboolib.ioc.annotation.PostConstruct
+import top.wcpe.taboolib.ioc.annotation.PreDestroy
+import top.wcpe.taboolib.ioc.annotation.Resource
+import top.wcpe.taboolib.ioc.annotation.Service
+import top.wcpe.taboolib.ioc.example.component.ExampleTextComponent
+import top.wcpe.taboolib.ioc.example.gateway.ExampleGateway
+import top.wcpe.taboolib.ioc.example.repository.ExampleUserRepository
+
+@Service
+class ExampleReportService @Inject constructor(
+    private val repository: ExampleUserRepository
+) {
+
+    @Inject
+    @Named("wechatGateway")
+    lateinit var auditGateway: ExampleGateway
+
+    private lateinit var fallbackGateway: ExampleGateway
+    private lateinit var textComponent: ExampleTextComponent
+    private var postConstructInvoked = false
+
+    @Resource(name = "alipayGateway")
+    fun bindFallbackGateway(gateway: ExampleGateway) {
+        fallbackGateway = gateway
+    }
+
+    @Inject
+    fun bindTextComponent(textComponent: ExampleTextComponent) {
+        this.textComponent = textComponent
+    }
+
+    @PostConstruct
+    fun onInit() {
+        postConstructInvoked = true
+        info("ExampleReportService 初始化完成")
+    }
+
+    @PreDestroy
+    fun onDestroy() {
+        info("ExampleReportService 销毁前回调")
+    }
+
+    fun buildCoreChecks(): List<String> {
+        return listOf(
+            textComponent.line("constructorInjection", repository.loadStatus()),
+            textComponent.line("fieldNamedInjection", auditGateway.channel()),
+            textComponent.line("methodResourceInjection", fallbackGateway.channel()),
+            textComponent.line("methodInject", textComponent.javaClass.simpleName),
+            textComponent.line("postConstruct", postConstructInvoked)
+        )
+    }
+
+    fun objectSummary(): String {
+        return "${repository.loadStatus()}|${auditGateway.channel()}"
+    }
+}
