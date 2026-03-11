@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example.repository
+package top.wcpe.ioc.example.repository
 
 import top.wcpe.taboolib.ioc.annotation.Repository
 

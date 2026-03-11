@@ -1,13 +1,13 @@
-package top.wcpe.taboolib.ioc.example.controller
+package top.wcpe.ioc.example.controller
 
 import top.wcpe.taboolib.ioc.annotation.Controller
 import top.wcpe.taboolib.ioc.annotation.Inject
 import top.wcpe.taboolib.ioc.bean.BeanContainer
-import top.wcpe.taboolib.ioc.example.component.ExampleTextComponent
-import top.wcpe.taboolib.ioc.example.gateway.ExampleGateway
-import top.wcpe.taboolib.ioc.example.model.ExampleManualToken
-import top.wcpe.taboolib.ioc.example.service.ExampleReportService
-import top.wcpe.taboolib.ioc.example.support.ExampleObjectBridge
+import top.wcpe.ioc.example.component.ExampleTextComponent
+import top.wcpe.ioc.example.gateway.ExampleGateway
+import top.wcpe.ioc.example.model.ExampleManualToken
+import top.wcpe.ioc.example.service.ExampleReportService
+import top.wcpe.ioc.example.support.ExampleObjectBridge
 
 @Controller
 class ExampleFeatureController @Inject constructor(

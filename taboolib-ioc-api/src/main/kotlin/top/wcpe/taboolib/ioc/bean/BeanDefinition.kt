@@ -1,5 +1,6 @@
 package top.wcpe.taboolib.ioc.bean
 
+import top.wcpe.taboolib.ioc.annotation.Named
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 
@@ -23,11 +24,61 @@ class BeanDefinition(
     val injectFields: List<InjectField>,
     val injectMethods: List<InjectMethod>,
     val postConstruct: Method?,
-    val preDestroy: Method?
+    val preDestroy: Method?,
+    val constructorParameters: List<InjectParameter>,
+    val dependencies: List<InjectParameter>
 ) {
     init {
         constructor.isAccessible = true
         postConstruct?.isAccessible = true
         preDestroy?.isAccessible = true
+    }
+
+    constructor(
+        name: String,
+        type: Class<*>,
+        constructor: Constructor<*>,
+        injectFields: List<InjectField>,
+        injectMethods: List<InjectMethod>,
+        postConstruct: Method?,
+        preDestroy: Method?
+    ) : this(
+        name = name,
+        type = type,
+        constructor = constructor,
+        injectFields = injectFields,
+        injectMethods = injectMethods,
+        postConstruct = postConstruct,
+        preDestroy = preDestroy,
+        constructorParameters = resolveConstructorParameters(constructor),
+        dependencies = resolveDependencies(constructor, injectFields, injectMethods)
+    )
+
+    companion object {
+
+        private fun resolveConstructorParameters(constructor: Constructor<*>): List<InjectParameter> {
+            if (constructor.parameterCount == 0) {
+                return emptyList()
+            }
+
+            return constructor.parameterTypes.mapIndexed { index, type ->
+                val annotations = constructor.parameterAnnotations[index]
+                val named = annotations.filterIsInstance<Named>().firstOrNull()
+                InjectParameter(
+                    type = type,
+                    nameQualifier = named?.value?.takeIf { it.isNotEmpty() }
+                )
+            }
+        }
+
+        private fun resolveDependencies(
+            constructor: Constructor<*>,
+            injectFields: List<InjectField>,
+            injectMethods: List<InjectMethod>
+        ): List<InjectParameter> {
+            return resolveConstructorParameters(constructor) +
+                injectFields.map { InjectParameter(it.requiredType, it.nameQualifier) } +
+                injectMethods.flatMap { it.parameters }
+        }
     }
 }

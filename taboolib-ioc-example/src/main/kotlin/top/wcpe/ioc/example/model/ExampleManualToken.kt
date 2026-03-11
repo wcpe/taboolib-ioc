@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example.model
+package top.wcpe.ioc.example.model
 
 data class ExampleManualToken(
     val value: String

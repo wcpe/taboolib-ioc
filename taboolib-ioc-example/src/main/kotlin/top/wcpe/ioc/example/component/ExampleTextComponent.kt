@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example.component
+package top.wcpe.ioc.example.component
 
 import top.wcpe.taboolib.ioc.annotation.Component
 

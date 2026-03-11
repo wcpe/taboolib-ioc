@@ -23,8 +23,12 @@ class ClassScanner(
         val annotation = findComponentAnnotation(clazz) ?: return null
         val name = resolveBeanName(clazz, annotation)
         val constructor = constructorResolver.resolve(clazz)
+        val constructorParameters = resolveConstructorParameters(constructor)
         val injectFields = resolveInjectFields(clazz)
         val injectMethods = resolveInjectMethods(clazz)
+        val dependencies = constructorParameters +
+            injectFields.map { InjectParameter(it.requiredType, it.nameQualifier) } +
+            injectMethods.flatMap { method -> method.parameters }
         val postConstruct = findPostConstruct(clazz)
         val preDestroy = findPreDestroy(clazz)
 
@@ -32,8 +36,10 @@ class ClassScanner(
             name = name,
             type = clazz,
             constructor = constructor,
+            constructorParameters = constructorParameters,
             injectFields = injectFields,
             injectMethods = injectMethods,
+            dependencies = dependencies,
             postConstruct = postConstruct,
             preDestroy = preDestroy
         )
@@ -76,6 +82,24 @@ class ClassScanner(
         // 类名首字母小写
         val className = clazz.simpleName
         return className.replaceFirstChar { it.lowercase() }
+    }
+
+    /**
+     * 解析构造函数参数依赖。
+     */
+    private fun resolveConstructorParameters(constructor: java.lang.reflect.Constructor<*>): List<InjectParameter> {
+        if (constructor.parameterCount == 0) {
+            return emptyList()
+        }
+
+        return constructor.parameterTypes.mapIndexed { index, type ->
+            val annotations = constructor.parameterAnnotations[index]
+            val named = annotations.filterIsInstance<Named>().firstOrNull()
+            InjectParameter(
+                type = type,
+                nameQualifier = named?.value?.takeIf { it.isNotEmpty() }
+            )
+        }
     }
 
     /**

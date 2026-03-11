@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example.gateway
+package top.wcpe.ioc.example.gateway
 
 import top.wcpe.taboolib.ioc.annotation.Component
 

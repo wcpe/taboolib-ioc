@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example.gateway
+package top.wcpe.ioc.example.gateway
 
 interface ExampleGateway {
 

@@ -4,11 +4,16 @@ import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
+import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.Injector
 
 /**
- * 生命周期管理器
+ * 生命周期管理器。
+ *
+ * 采用两阶段装配：
+ * 1. 先按构造依赖顺序实例化所有 Bean
+ * 2. 再统一执行字段/方法注入与 PostConstruct
  */
 class LifecycleManager(
     private val registry: BeanRegistry,
@@ -24,14 +29,39 @@ class LifecycleManager(
      */
     fun initialize() {
         val definitions = registry.getAll().toList()
-        val sorted = topologicalSort(definitions)
+        val constructorOrder = topologicalSortByConstructor(definitions)
+        val lifecycleOrder = topologicalSortByDependencies(definitions)
 
-        debug("[IoC] 开始初始化容器，共 ${sorted.size} 个 Bean")
-        debug("[IoC] 初始化顺序: ${sorted.map { it.name }}")
+        debug("[IoC] 开始初始化容器，共 ${constructorOrder.size} 个 Bean")
+        debug("[IoC] 实例化顺序: ${constructorOrder.map { it.name }}")
 
-        for (definition in sorted) {
+        for (definition in constructorOrder) {
             try {
-                injector.createAndInject(definition)
+                val instance = injector.instantiate(definition)
+                cycleResolver.addSingleton(definition.name, instance)
+                debug("[IoC] Bean 实例创建完成: ${definition.name}")
+            } catch (e: Exception) {
+                warning("[IoC] Bean 实例创建失败: ${definition.name} - ${e.message}")
+                throw e
+            }
+        }
+
+        for (definition in constructorOrder) {
+            val instance = cycleResolver.getSingleton(definition.name).first ?: continue
+            try {
+                injector.populate(instance, definition)
+                debug("[IoC] Bean 依赖装配完成: ${definition.name}")
+            } catch (e: Exception) {
+                warning("[IoC] Bean 依赖装配失败: ${definition.name} - ${e.message}")
+                throw e
+            }
+        }
+
+        debug("[IoC] 生命周期回调顺序: ${lifecycleOrder.map { it.name }}")
+        for (definition in lifecycleOrder) {
+            val instance = cycleResolver.getSingleton(definition.name).first ?: continue
+            try {
+                injector.invokePostConstruct(instance, definition)
                 initializationOrder.add(definition.name)
                 debug("[IoC] Bean 初始化完成: ${definition.name}")
             } catch (e: Exception) {
@@ -64,37 +94,77 @@ class LifecycleManager(
         debug("[IoC] 容器关闭完成")
     }
 
-    /**
-     * 拓扑排序 Bean 定义
-     */
-    private fun topologicalSort(definitions: List<BeanDefinition>): List<BeanDefinition> {
+    private fun topologicalSortByConstructor(definitions: List<BeanDefinition>): List<BeanDefinition> {
+        val definitionByName = definitions.associateBy { it.name }
+        val visited = mutableSetOf<String>()
+        val visiting = mutableListOf<String>()
+        val sorted = mutableListOf<BeanDefinition>()
+
+        fun visit(definition: BeanDefinition) {
+            if (definition.name in visited) {
+                return
+            }
+            val visitingIndex = visiting.indexOf(definition.name)
+            if (visitingIndex >= 0) {
+                val chain = visiting.subList(visitingIndex, visiting.size) + definition.name
+                throw CircularDependencyException(definition.name, chain)
+            }
+
+            visiting += definition.name
+            definition.constructorParameters.forEach { dependency ->
+                val dependencyDefinition = resolveDependencyDefinition(dependency.type, dependency.nameQualifier, definitionByName)
+                if (dependencyDefinition != null && dependencyDefinition.name != definition.name) {
+                    visit(dependencyDefinition)
+                }
+            }
+            visiting.remove(definition.name)
+            visited += definition.name
+            sorted += definition
+        }
+
+        definitions.forEach(::visit)
+        return sorted
+    }
+
+    private fun topologicalSortByDependencies(definitions: List<BeanDefinition>): List<BeanDefinition> {
+        val definitionByName = definitions.associateBy { it.name }
         val visited = mutableSetOf<String>()
         val visiting = mutableSetOf<String>()
         val sorted = mutableListOf<BeanDefinition>()
 
-        fun visit(def: BeanDefinition) {
-            if (def.name in visited) return
-            if (def.name in visiting) return // 循环依赖，跳过
+        fun visit(definition: BeanDefinition) {
+            if (definition.name in visited) {
+                return
+            }
+            if (!visiting.add(definition.name)) {
+                return
+            }
 
-            visiting.add(def.name)
-
-            // 遍历依赖
-            for (field in def.injectFields) {
-                val depDef = registry.getPrimaryByType(field.requiredType)
-                if (depDef != null && depDef.name != def.name) {
-                    visit(depDef)
+            definition.dependencies.forEach { dependency ->
+                val dependencyDefinition = resolveDependencyDefinition(dependency.type, dependency.nameQualifier, definitionByName)
+                if (dependencyDefinition != null && dependencyDefinition.name != definition.name) {
+                    visit(dependencyDefinition)
                 }
             }
 
-            visiting.remove(def.name)
-            visited.add(def.name)
-            sorted.add(def)
+            visiting.remove(definition.name)
+            visited += definition.name
+            sorted += definition
         }
 
-        for (def in definitions) {
-            visit(def)
-        }
-
+        definitions.forEach(::visit)
         return sorted
+    }
+
+    private fun resolveDependencyDefinition(
+        type: Class<*>,
+        name: String?,
+        definitionByName: Map<String, BeanDefinition>
+    ): BeanDefinition? {
+        return if (name != null) {
+            definitionByName[name]
+        } else {
+            registry.getPrimaryByType(type)
+        }
     }
 }

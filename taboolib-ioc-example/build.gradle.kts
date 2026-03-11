@@ -1,4 +1,5 @@
-import io.izzel.taboolib.gradle.*
+import io.izzel.taboolib.gradle.Basic
+import io.izzel.taboolib.gradle.Bukkit
 
 plugins {
     id("io.izzel.taboolib")
@@ -17,9 +18,12 @@ taboolib {
         }
     }
     env {
+        debug = true
         install(Basic)
         install(Bukkit)
+        group = "top.wcpe.ioc.example"
     }
+    relocate("top.wcpe.taboolib.ioc", "top.wcpe.ioc.example.ioc")
     subproject = false
 }
 

@@ -1,4 +1,4 @@
-package top.wcpe.taboolib.ioc.example
+package top.wcpe.ioc.example
 
 import taboolib.common.Inject as TabooLibInject
 import taboolib.common.LifeCycle
@@ -6,8 +6,8 @@ import taboolib.common.platform.Awake
 import taboolib.common.platform.function.info
 import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.annotation.Inject
-import top.wcpe.taboolib.ioc.example.controller.ExampleFeatureController
-import top.wcpe.taboolib.ioc.example.model.ExampleManualToken
+import top.wcpe.ioc.example.controller.ExampleFeatureController
+import top.wcpe.ioc.example.model.ExampleManualToken
 
 @TabooLibInject
 object ExamplePlugin {
