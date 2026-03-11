@@ -6,31 +6,24 @@
 
 ### Gradle (Kotlin DSL)
 
+使用 TabooLib 的 `taboo()` 方法将 IoC 容器打包到插件内：
+
 ```kotlin
 repositories {
     maven("https://maven.wcpe.top/repository/maven-public/")
 }
 
 dependencies {
-    compileOnly("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+}
+
+// 重定向到你的插件包名，避免与其他插件冲突
+taboolib {
+    relocate("top.wcpe.taboolib.ioc", "top.wcpe.yourplugin.ioc")
 }
 ```
 
-### Maven
-
-```xml
-<repository>
-    <id>wcpe</id>
-    <url>https://maven.wcpe.top/repository/maven-public/</url>
-</repository>
-
-<dependency>
-    <groupId>top.wcpe.taboolib.ioc</groupId>
-    <artifactId>taboolib-ioc</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <scope>provided</scope>
-</dependency>
-```
+> **重要**：必须使用 `taboo()` 而非 `compileOnly()`，否则运行时找不到类。同时务必配置 `relocate` 重定向包名。
 
 
 ## 注解
@@ -163,6 +156,9 @@ annotation class Inject
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
 @Service
 class UserService @Inject constructor(
     private val repository: UserRepository
@@ -193,6 +189,9 @@ annotation class Named(val value: String = "")
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Inject
+import top.wcpe.yourplugin.ioc.annotation.Named
+
 @Inject
 @Named("wechatGateway")
 lateinit var gateway: PaymentGateway
@@ -216,6 +215,8 @@ annotation class Resource(val name: String = "")
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Resource
+
 @Resource(name = "alipayGateway")
 fun bindGateway(gateway: PaymentGateway) {
     this.gateway = gateway
@@ -276,6 +277,8 @@ fun <T> getBean(type: Class<T>, name: String? = null): T?
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 val service = BeanContainer.getBean(UserService::class.java)
 val gateway = BeanContainer.getBean(PaymentGateway::class.java, "wechatGateway")
 ```
@@ -294,6 +297,8 @@ fun <T> getBeansOfType(type: Class<T>): List<T>
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 val gateways = BeanContainer.getBeansOfType(PaymentGateway::class.java)
 ```
 
@@ -332,6 +337,8 @@ fun registerBean(name: String, instance: Any)
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 BeanContainer.registerBean("manualValue", ManualValue("ok"))
 val value = BeanContainer.getBean(ManualValue::class.java, "manualValue")
 ```
@@ -351,6 +358,11 @@ fun registerScope(name: String, scope: BeanScope)
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+import top.wcpe.yourplugin.ioc.bean.BeanScope
+import top.wcpe.yourplugin.ioc.bean.BeanDefinition
+import java.util.concurrent.ConcurrentHashMap
+
 BeanContainer.registerScope("conversation", object : BeanScope {
     private val cache = ConcurrentHashMap<String, Any>()
 
@@ -393,6 +405,9 @@ BeanContainer.registerScope("conversation", object : BeanScope {
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Repository
+
 @Service("customService")
 class MyService
 
@@ -407,6 +422,8 @@ class UserRepository // bean name: userRepository
 示例：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
 object PluginState {
 
     @Inject

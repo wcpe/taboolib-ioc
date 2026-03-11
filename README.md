@@ -2,6 +2,10 @@
 
 为 TabooLib Bukkit 插件场景提供的轻量 IoC 容器。
 
+[![版本](https://img.shields.io/badge/版本-1.0.0--SNAPSHOT-blue)](CHANGELOG.md)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-orange)](https://kotlinlang.org)
+[![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
+
 ## 当前支持
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
@@ -37,37 +41,35 @@
 
 ### Gradle (Kotlin DSL)
 
+使用 TabooLib 的 `taboo()` 方法将 IoC 容器打包到插件内：
+
 ```kotlin
 repositories {
     maven("https://maven.wcpe.top/repository/maven-public/")
 }
 
 dependencies {
-    compileOnly("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+}
+
+// 重定向到你的插件包名，避免与其他插件冲突
+taboolib {
+    relocate("top.wcpe.taboolib.ioc", "top.wcpe.yourplugin.ioc")
 }
 ```
 
-### Maven
-
-```xml
-<repository>
-    <id>wcpe</id>
-    <url>https://maven.wcpe.top/repository/maven-public/</url>
-</repository>
-
-<dependency>
-    <groupId>top.wcpe.taboolib.ioc</groupId>
-    <artifactId>taboolib-ioc</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <scope>provided</scope>
-</dependency>
-```
+> **重要**：必须使用 `taboo()` 而非 `compileOnly()`，否则运行时找不到类。同时务必配置 `relocate` 重定向包名。
 
 ## 快速开始
 
 ### 1. 定义组件
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Repository
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Component
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
 // 仓储层 - 使用 @Repository 标记
 @Repository
 class UserRepository {
@@ -92,6 +94,9 @@ class TextFormatter {
 ### 2. 使用依赖注入
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
 @Service
 class OrderService {
 
@@ -119,6 +124,12 @@ class OrderService {
 当同一接口有多个实现时，使用 `@Named` 或 `@Resource` 指定具体实现：
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Component
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Inject
+import top.wcpe.yourplugin.ioc.annotation.Named
+import top.wcpe.yourplugin.ioc.annotation.Resource
+
 interface PaymentGateway {
     fun channel(): String
 }
@@ -154,6 +165,10 @@ class PaymentService {
 ### 4. 生命周期回调
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.PostConstruct
+import top.wcpe.yourplugin.ioc.annotation.PreDestroy
+
 @Service
 class LifecycleService {
 
@@ -172,6 +187,8 @@ class LifecycleService {
 ### 5. 从容器获取 Bean
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 // 按类型获取
 val userService = BeanContainer.getBean(UserService::class.java)
 
@@ -194,6 +211,8 @@ BeanContainer.registerBean("manualValue", MyCustomObject("data"))
 ### 6. Kotlin object 注入
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
 object PluginState {
 
     @Inject
@@ -208,6 +227,11 @@ object PluginState {
 ### 7. 作用域与懒加载
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.Prototype
+import top.wcpe.yourplugin.ioc.annotation.Lazy
+import top.wcpe.yourplugin.ioc.annotation.Scope
+
 // 默认单例
 @Service
 class SingletonService
@@ -233,6 +257,11 @@ class ConversationService
 以下是一个完整的插件示例，展示所有核心功能：
 
 ```kotlin
+import taboolib.common.LifeCycle
+import taboolib.common.platform.Awake
+import top.wcpe.yourplugin.ioc.annotation.*
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 // 1. 定义仓储
 @Repository
 class UserRepository {
@@ -298,6 +327,8 @@ object ExamplePlugin {
 ## 容器 API
 
 ```kotlin
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
 val userService = BeanContainer.getBean(UserService::class.java)
 val namedService = BeanContainer.getBean(UserService::class.java, "userService")
 val services = BeanContainer.getBeansOfType(UserService::class.java)
