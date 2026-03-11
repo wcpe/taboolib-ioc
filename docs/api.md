@@ -77,6 +77,72 @@ annotation class Repository(val value: String = "")
 annotation class Controller(val value: String = "")
 ```
 
+### `@Lazy`
+
+延迟 Bean 初始化。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Lazy(val value: Boolean = true)
+```
+
+说明：
+
+- 仅作用于 Bean 自身的创建时机
+- singleton Bean 会在首次解析时初始化，而不是在容器启动时预初始化
+- 不提供注入点级别的代理懒加载
+
+### `@Scope`
+
+声明 Bean 作用域。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Scope(val value: String = "singleton")
+```
+
+说明：
+
+- 默认作用域是 `singleton`
+- 内置支持 `singleton` 与 `prototype`
+- 其他名称会被当作自定义作用域，通过 `BeanContainer.registerScope(...)` 解析
+
+### `@Prototype`
+
+`prototype` 作用域的快捷注解。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Prototype
+```
+
+说明：
+
+- 每次 `getBean(...)` 或每次依赖解析都会创建新实例
+- prototype Bean 不参与容器关闭时的统一 `@PreDestroy`
+
+### `@ComponentScan`
+
+限制当前插件 Jar 内的组件扫描范围。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ComponentScan(
+    val value: Array<String> = [],
+    val basePackages: Array<String> = [],
+    val basePackageClasses: Array<KClass<*>> = []
+)
+```
+
+说明：
+
+- 未声明时，默认扫描当前插件 Jar 内的全部组件类
+- 声明后，仅扫描指定包及其子包
+- 未显式指定包时，默认使用声明该注解的类所在包
 ### `@Inject`
 
 依赖注入注解。
@@ -188,7 +254,7 @@ annotation class PreDestroy
 
 ## 循环依赖
 
-- 字段注入和方法注入形成的循环依赖会在两阶段装配中完成
+- singleton Bean 的字段注入和方法注入循环依赖会在早期暴露阶段完成
 - 构造函数循环依赖会在 `ACTIVE` 初始化阶段抛出 `CircularDependencyException`
 - 异常会携带完整依赖链，便于快速定位问题
 
@@ -270,6 +336,29 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 val value = BeanContainer.getBean(ManualValue::class.java, "manualValue")
 ```
 
+### `registerScope(name, scope)`
+
+```kotlin
+fun registerScope(name: String, scope: BeanScope)
+```
+
+行为：
+
+- 注册一个自定义 Bean 作用域
+- `name` 不能覆盖内置的 `singleton` / `prototype`
+- 需在容器初始化前完成注册，供 `@Scope("...")` Bean 使用
+
+示例：
+
+```kotlin
+BeanContainer.registerScope("conversation", object : BeanScope {
+    private val cache = ConcurrentHashMap<String, Any>()
+
+    override fun get(name: String, definition: BeanDefinition, creator: () -> Any): Any {
+        return cache.getOrPut(name, creator)
+    }
+})
+```
 ## 扫描与生命周期
 
 ### 扫描时机
@@ -277,11 +366,13 @@ val value = BeanContainer.getBean(ManualValue::class.java, "manualValue")
 - 组件类在 TabooLib `ENABLE` 阶段扫描
 - 扫描源来自当前插件 Jar 的类表
 - 不依赖你的业务包名是否包含 `.taboolib.`
+- 如果存在 `@ComponentScan`，只会注册命中包范围的组件
 
 ### 容器初始化时机
 
 - 容器在 `ACTIVE` 前置任务中初始化
-- 初始化采用两阶段装配：先实例化，再统一执行字段/方法注入与 `@PostConstruct`
+- 非 lazy 的 singleton Bean 会在初始化阶段预先创建
+- `@Lazy` singleton、`prototype` 与自定义作用域 Bean 会在首次解析时按需创建
 - Kotlin `object` 注入在容器初始化之后、用户 `@Awake(ACTIVE)` 之前执行
 
 ## 构造函数解析规则
@@ -338,10 +429,11 @@ object PluginState {
 - Kotlin `object` 自动注入
 - `getBean` / `getBeansOfType` / `containsBean` / `getBeanNames` / `registerBean`
 
-## 不再提供的能力
+## 作用域与懒加载说明
 
-下列能力已经从公开 API 中收敛，不应继续使用：
+- singleton Bean 支持字段/方法注入形成的循环依赖早期暴露
+- prototype / 自定义作用域 Bean 采用按需创建，不提供单例式的循环依赖缓存
+- 自定义作用域实例如何缓存、何时失效，由 `BeanScope` 实现自行决定
 
-- `@Lazy`
-- `@ComponentScan`
-- 自定义 Scope / Prototype 作用域
+
+

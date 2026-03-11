@@ -22,7 +22,7 @@
 
 - 移除未再使用的早期单例缓存路径
 - 删除未使用的构造函数注入状态判断逻辑
-- 清理文档中关于 `@Lazy`、`@ComponentScan`、自定义 Scope 等旧描述
+- 更新 README / API 文档，使 `@Lazy`、`@ComponentScan`、自定义 Scope 描述与当前实现一致
 
 ---
 
@@ -42,3 +42,4 @@
 - `@Configuration` + `@Bean` Java Config 支持
 - Bean 生命周期事件
 - 更多扩展点
+

@@ -19,26 +19,17 @@ import java.util.concurrent.ConcurrentHashMap
  * ## 使用示例
  *
  * ```kotlin
- * // 按类型获取 Bean
  * val userService = BeanContainer.getBean(UserService::class.java)
- *
- * // 按名称获取 Bean
  * val service = BeanContainer.getBean(UserService::class.java, "myService")
- *
- * // 获取某类型的所有 Bean
  * val allServices = BeanContainer.getBeansOfType(UserService::class.java)
- *
- * // 手动注册 Bean
  * BeanContainer.registerBean("dataSource", dataSource)
  * ```
- *
- * @see top.wcpe.taboolib.ioc.annotation.Component
- * @see top.wcpe.taboolib.ioc.annotation.Inject
  */
 object BeanContainer {
 
     private val registry = BeanRegistry()
     private val manualBeansByName = ConcurrentHashMap<String, Any>()
+    private val customScopes = ConcurrentHashMap<String, BeanScope>()
     private val cycleDetector = CycleDetector()
     private val cycleResolver = CycleResolver()
     private val constructorResolver = ConstructorResolver()
@@ -46,16 +37,17 @@ object BeanContainer {
     private val fieldInjector = FieldInjector(registry) { type, name ->
         getBean(type, name)
     }
-    private val injector = Injector(
-        registry, cycleResolver, fieldInjector
+    private val injector = Injector(fieldInjector) { type, name ->
+        getBean(type, name)
+    }
+    private val lifecycleManager = LifecycleManager(
+        registry = registry,
+        cycleResolver = cycleResolver,
+        injector = injector,
+        cycleDetector = cycleDetector,
+        scopeLookup = ::getScope
     )
-    private val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
 
-    /**
-     * 容器是否已初始化。
-     *
-     * 容器会在 Taboolib 的 ACTIVE 生命周期阶段自动初始化。
-     */
     @Volatile
     var initialized = false
         private set
@@ -63,14 +55,6 @@ object BeanContainer {
     @Volatile
     private var initializing = false
 
-    /**
-     * 获取 Bean 实例。
-     *
-     * @param T Bean 类型
-     * @param type Bean 的类型
-     * @param name Bean 的名称（可选），指定后按名称匹配
-     * @return Bean 实例，如果不存在则返回 null
-     */
     @Suppress("UNCHECKED_CAST")
     fun <T> getBean(type: Class<T>, name: String? = null): T? {
         if (!initialized && !initializing) {
@@ -80,7 +64,6 @@ object BeanContainer {
 
         if (name != null) {
             manualBeansByName[name]?.takeIf { type.isInstance(it) }?.let {
-                @Suppress("UNCHECKED_CAST")
                 return it as T
             }
         }
@@ -88,13 +71,6 @@ object BeanContainer {
         return (resolveBean(type, name) ?: resolveManualBean(type)) as? T
     }
 
-    /**
-     * 获取所有指定类型的 Bean 实例。
-     *
-     * @param T Bean 类型
-     * @param type Bean 的类型
-     * @return Bean 实例列表
-     */
     @Suppress("UNCHECKED_CAST")
     fun <T> getBeansOfType(type: Class<T>): List<T> {
         if (!initialized) return emptyList()
@@ -109,38 +85,23 @@ object BeanContainer {
         return (registeredBeans + manualBeans).distinctBy { System.identityHashCode(it) }
     }
 
-    /**
-     * 检查是否包含指定名称的 Bean。
-     *
-     * @param name Bean 名称
-     * @return 是否存在该名称的 Bean
-     */
     fun containsBean(name: String): Boolean = manualBeansByName.containsKey(name) || registry.contains(name)
 
-    /**
-     * 获取所有 Bean 的名称列表。
-     *
-     * @return Bean 名称集合
-     */
     fun getBeanNames(): Set<String> = registry.getNames() + manualBeansByName.keys
 
-    /**
-     * 手动注册一个 Bean 实例。
-     *
-     * 用于动态注册第三方库的对象或需要手动创建的实例。
-     *
-     * @param name Bean 名称
-     * @param instance Bean 实例
-     */
     fun registerBean(name: String, instance: Any) {
         manualBeansByName[name] = instance
         cycleResolver.addSingleton(name, instance)
         debug("[IoC] 手动注册 Bean: $name")
     }
 
-    /**
-     * 初始化容器
-     */
+    fun registerScope(name: String, scope: BeanScope) {
+        val normalized = BeanScopes.normalize(name)
+        require(!BeanScopes.isStandard(normalized)) { "标准作用域不允许被覆盖: $name" }
+        customScopes[normalized] = scope
+        debug("[IoC] 注册自定义作用域: $normalized")
+    }
+
     internal fun initialize() {
         if (initialized) return
 
@@ -155,14 +116,11 @@ object BeanContainer {
         }
     }
 
-    /**
-     * 关闭容器
-     */
     internal fun shutdown() {
         if (!initialized) return
 
         lifecycleManager.shutdown()
-
+        clearScopes()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
@@ -171,17 +129,13 @@ object BeanContainer {
         debug("[IoC] 容器已关闭")
     }
 
-    /**
-     * 获取注册表（供 ComponentVisitor 使用）
-     */
     internal fun getRegistry(): BeanRegistry = registry
 
-    /**
-     * 获取扫描器（供 ComponentVisitor 使用）
-     */
     internal fun getScanner(): ClassScanner = scanner
 
     internal fun resetForTesting() {
+        lifecycleManager.resetState()
+        clearScopes()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
@@ -200,10 +154,36 @@ object BeanContainer {
             return null
         }
 
-        return cycleResolver.getSingleton(definition.name)
+        return when {
+            definition.isSingletonScope() -> lifecycleManager.getOrCreateSingleton(definition)
+            definition.isPrototypeScope() -> lifecycleManager.createTransient(definition)
+            else -> resolveCustomScopedBean(definition)
+        }
+    }
+
+    private fun resolveCustomScopedBean(definition: BeanDefinition): Any {
+        val scope = getScope(definition.scope)
+            ?: throw IllegalStateException("未注册的 Bean 作用域: ${definition.scope} (${definition.name})")
+
+        return scope.get(definition.name, definition) {
+            lifecycleManager.createTransient(definition)
+        }
     }
 
     private fun resolveManualBean(type: Class<*>): Any? {
         return manualBeansByName.values.firstOrNull { type.isInstance(it) }
     }
+
+    private fun clearScopes() {
+        customScopes.values.forEach { scope ->
+            runCatching { scope.clear() }
+                .onFailure { warning("[IoC] 清理自定义作用域失败: ${it.message}") }
+        }
+        customScopes.clear()
+    }
+
+    private fun getScope(name: String): BeanScope? {
+        return customScopes[BeanScopes.normalize(name)]
+    }
 }
+

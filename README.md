@@ -6,22 +6,32 @@
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
 - 依赖注入：构造函数、字段、方法注入
-- 两阶段装配：扫描期注册元数据，`ACTIVE` 阶段统一实例化与注入
+- 容器初始化：非 lazy singleton 在 `ACTIVE` 阶段预初始化，其他作用域按需创建
 - 名称限定：`@Named`、`@Resource`
 - 生命周期：`@PostConstruct`、`@PreDestroy`
-- 循环依赖检测：字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
+- 作用域：默认 singleton、`@Prototype`、`@Scope` 与 `registerScope` 自定义作用域
+- 扫描控制：`@ComponentScan`
+- 懒加载：`@Lazy`
+- 循环依赖检测：singleton Bean 的字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
 - Kotlin `object` 自动注入
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
 - 手动注册单例：`registerBean`
 - 按接口和父类类型解析 Bean
 
-## 已移除的伪功能
+## 作用域与扫描说明
 
-下面这些能力此前出现在文档里，但实现并不成立，已经从公开 API 中收敛掉：
+当前版本已经重新提供并实现以下能力：
 
-- `@Lazy`
-- `@ComponentScan`
-- 自定义 Scope / Prototype 作用域
+- `@Lazy`：仅延迟 Bean 自身的创建，首次被解析时初始化
+- `@ComponentScan`：可按包名或基准类限制当前插件 Jar 内的组件扫描范围
+- `@Prototype`：每次解析都会创建新实例
+- `@Scope("custom")`：配合 `BeanContainer.registerScope(...)` 使用自定义作用域
+
+说明：
+
+- 默认仍是 singleton 单例作用域
+- singleton Bean 支持字段/方法循环依赖的早期暴露
+- prototype / 自定义作用域 Bean 采用按需创建，不参与容器关闭时的统一 `@PreDestroy`
 
 ## 安装
 
@@ -162,4 +172,7 @@ ExampleReportService 销毁前回调
 - Kotlin 属性注入直接写 `@Inject lateinit var foo: Foo` 即可，不需要强制改成 `@field:Inject`
 - 如果依赖类型存在多个实现，优先用 `@Named` 或 `@Resource(name = ...)`
 - 如果构造函数不止一个，显式写 `@Inject constructor(...)`
-- 字段或方法形成的循环依赖会在两阶段装配里完成；构造函数循环依赖会在初始化阶段直接失败
+- singleton Bean 的字段或方法循环依赖会在早期暴露阶段完成；构造函数循环依赖会在初始化或首次解析时直接失败
+
+
+

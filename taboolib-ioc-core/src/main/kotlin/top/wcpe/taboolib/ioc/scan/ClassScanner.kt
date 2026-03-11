@@ -30,6 +30,8 @@ class ClassScanner(
             injectMethods.flatMap { method -> method.parameters }
         val postConstruct = findPostConstruct(clazz)
         val preDestroy = findPreDestroy(clazz)
+        val lazyInit = resolveLazyInit(clazz)
+        val scope = resolveScope(clazz)
 
         return BeanDefinition(
             name = name,
@@ -40,7 +42,9 @@ class ClassScanner(
             injectMethods = injectMethods,
             dependencies = dependencies,
             postConstruct = postConstruct,
-            preDestroy = preDestroy
+            preDestroy = preDestroy,
+            lazyInit = lazyInit,
+            scope = scope
         )
     }
 
@@ -48,20 +52,19 @@ class ClassScanner(
      * 检查类是否为组件
      */
     fun isComponent(clazz: Class<*>): Boolean {
-        return clazz.isAnnotationPresent(Component::class.java)
-                || clazz.isAnnotationPresent(Service::class.java)
-                || clazz.isAnnotationPresent(Repository::class.java)
-                || clazz.isAnnotationPresent(Controller::class.java)
+        return clazz.isAnnotationPresent(Component::class.java) ||
+            clazz.isAnnotationPresent(Service::class.java) ||
+            clazz.isAnnotationPresent(Repository::class.java) ||
+            clazz.isAnnotationPresent(Controller::class.java)
     }
 
     /**
      * 查找组件注解
      */
     private fun findComponentAnnotation(clazz: Class<*>): Annotation? {
-        return clazz.getAnnotation(Component::class.java)
-                ?: clazz.getAnnotation(Service::class.java)
-                ?: clazz.getAnnotation(Repository::class.java)
-                ?: clazz.getAnnotation(Controller::class.java)
+        return clazz.getAnnotation(Component::class.java) ?: clazz.getAnnotation(Service::class.java)
+            ?: clazz.getAnnotation(Repository::class.java)
+            ?: clazz.getAnnotation(Controller::class.java)
     }
 
     /**
@@ -78,9 +81,19 @@ class ClassScanner(
 
         if (value.isNotEmpty()) return value
 
-        // 类名首字母小写
         val className = clazz.simpleName
         return className.replaceFirstChar { it.lowercase() }
+    }
+
+    private fun resolveLazyInit(clazz: Class<*>): Boolean {
+        return clazz.getAnnotation(Lazy::class.java)?.value == true
+    }
+
+    private fun resolveScope(clazz: Class<*>): String {
+        if (clazz.isAnnotationPresent(Prototype::class.java)) {
+            return BeanScopes.PROTOTYPE
+        }
+        return BeanScopes.normalize(clazz.getAnnotation(Scope::class.java)?.value)
     }
 
     /**
@@ -163,3 +176,5 @@ class ClassScanner(
         return clazz.declaredMethods.firstOrNull { it.isAnnotationPresent(PreDestroy::class.java) }
     }
 }
+
+

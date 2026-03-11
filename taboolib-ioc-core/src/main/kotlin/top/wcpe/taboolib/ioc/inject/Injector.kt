@@ -8,19 +8,23 @@ import top.wcpe.taboolib.ioc.cycle.CycleResolver
  * 注入器 - 协调实例化、属性装配与生命周期回调
  */
 class Injector(
-    private val registry: BeanRegistry,
-    private val cycleResolver: CycleResolver,
-    private val fieldInjector: FieldInjector
+    private val fieldInjector: FieldInjector,
+    private val beanProvider: (type: Class<*>, name: String?) -> Any?
 ) {
+
+    constructor(
+        registry: BeanRegistry,
+        cycleResolver: CycleResolver,
+        fieldInjector: FieldInjector
+    ) : this(
+        fieldInjector = fieldInjector,
+        beanProvider = singletonOnlyBeanProvider(registry, cycleResolver)
+    )
 
     /**
      * 创建 Bean 实例，但不执行字段/方法注入。
      */
     fun instantiate(definition: BeanDefinition): Any {
-        cycleResolver.getSingleton(definition.name)?.let { instance ->
-            return instance
-        }
-
         val constructorArgs = resolveConstructorArgs(definition)
         return definition.constructor.newInstance(*constructorArgs)
     }
@@ -49,32 +53,36 @@ class Injector(
         }
 
         return definition.constructorParameters.map { parameter ->
-            resolveBean(parameter.type, parameter.nameQualifier)
+            beanProvider(parameter.type, parameter.nameQualifier)
         }.toTypedArray()
     }
 
-    /**
-     * 解析 Bean
-     */
-    private fun resolveBean(type: Class<*>, name: String?): Any? {
-        if (name != null) {
-            cycleResolver.getSingleton(name)?.let { instance ->
-                if (type.isInstance(instance)) {
-                    return instance
+    companion object {
+
+        private fun singletonOnlyBeanProvider(
+            registry: BeanRegistry,
+            cycleResolver: CycleResolver
+        ): (Class<*>, String?) -> Any? {
+            return { type, name ->
+                if (name != null) {
+                    val namedInstance = cycleResolver.getSingleton(name)
+                    if (namedInstance != null && type.isInstance(namedInstance)) {
+                        namedInstance
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                } ?: run {
+                    val definition = if (name != null) {
+                        registry.getByName(name)
+                    } else {
+                        registry.getPrimaryByType(type)
+                    } ?: return@run null
+
+                    cycleResolver.getSingleton(definition.name)?.takeIf(type::isInstance)
                 }
             }
         }
-
-        val definition = if (name != null) {
-            registry.getByName(name)
-        } else {
-            registry.getPrimaryByType(type)
-        } ?: return null
-
-        cycleResolver.getSingleton(definition.name)?.let { instance ->
-            if (type.isInstance(instance)) return instance
-        }
-
-        return null
     }
 }

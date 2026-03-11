@@ -7,9 +7,12 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import top.wcpe.taboolib.ioc.annotation.Component
 import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.annotation.Lazy
 import top.wcpe.taboolib.ioc.annotation.Named
 import top.wcpe.taboolib.ioc.annotation.PostConstruct
+import top.wcpe.taboolib.ioc.annotation.Prototype
 import top.wcpe.taboolib.ioc.annotation.Resource
+import top.wcpe.taboolib.ioc.annotation.Scope
 import top.wcpe.taboolib.ioc.annotation.Service
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
@@ -38,6 +41,19 @@ class ContainerAssemblyTest {
         assertEquals(1, definition.injectMethods.size)
         assertEquals("alphaGateway", definition.injectMethods.single().parameters.single().nameQualifier)
         assertEquals(3, definition.dependencies.size)
+    }
+
+    @Test
+    fun `scanner should capture lazy and scope metadata`() {
+        val context = TestContext()
+
+        val lazyScoped = context.scan(LazyScopedMetadataService::class.java)
+        val prototype = context.scan(PrototypeMetadataService::class.java)
+
+        assertEquals(true, lazyScoped.lazyInit)
+        assertEquals("conversation", lazyScoped.scope)
+        assertEquals(true, prototype.isPrototypeScope())
+        assertEquals(false, prototype.lazyInit)
     }
 
     @Test
@@ -100,10 +116,8 @@ private class TestContext {
     private val cycleResolver = CycleResolver()
     private val cycleDetector = CycleDetector()
     private val constructorResolver = ConstructorResolver()
-    private val fieldInjector = FieldInjector(registry) { type, name ->
-        resolveExistingBean(type, name)
-    }
-    private val injector = Injector(registry, cycleResolver, fieldInjector)
+    private val fieldInjector = FieldInjector(registry, ::resolveBean)
+    private val injector = Injector(fieldInjector, ::resolveBean)
     val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
     private val scanner = ClassScanner(constructorResolver)
 
@@ -117,7 +131,7 @@ private class TestContext {
         return cycleResolver.getSingleton(name)
     }
 
-    private fun resolveExistingBean(type: Class<*>, name: String?): Any? {
+    private fun resolveBean(type: Class<*>, name: String?): Any? {
         if (name != null) {
             cycleResolver.getSingleton(name)?.let { instance ->
                 if (type.isInstance(instance)) {
@@ -132,7 +146,15 @@ private class TestContext {
             registry.getPrimaryByType(type)
         } ?: return null
 
-        return cycleResolver.getSingleton(definition.name)?.takeIf(type::isInstance)
+        if (!type.isAssignableFrom(definition.type)) {
+            return null
+        }
+
+        return if (definition.isSingletonScope()) {
+            lifecycleManager.getOrCreateSingleton(definition)
+        } else {
+            lifecycleManager.createTransient(definition)
+        }
     }
 }
 
@@ -189,6 +211,15 @@ private class MetadataDrivenService @Inject constructor(
 }
 
 @Component
+@Lazy
+@Scope("conversation")
+private class LazyScopedMetadataService
+
+@Component
+@Prototype
+private class PrototypeMetadataService
+
+@Component
 private class FieldCycleLeft {
 
     companion object {
@@ -229,3 +260,4 @@ private class ConstructorCycleLeft @Inject constructor(
 private class ConstructorCycleRight @Inject constructor(
     val left: ConstructorCycleLeft
 )
+

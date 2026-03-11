@@ -22,10 +22,20 @@ object ComponentVisitor : ClassVisitor(1) {
 
     @Awake(LifeCycle.ENABLE)
     fun scanAll() {
-        var scanned = 0
-        for (reflexClass in runningClassMapInJar.values) {
-            val javaClass = reflexClass.toClass() ?: continue
+        val allClasses = runningClassMapInJar.values
+            .mapNotNull { it.toClass() }
+            .distinct()
+        val scanPackages = ComponentScanPackages.resolve(allClasses)
+        val candidateClasses = allClasses.filter { clazz ->
+            ComponentScanPackages.matches(clazz, scanPackages)
+        }
 
+        if (scanPackages.isNotEmpty()) {
+            debug("[IoC] 启用 @ComponentScan，扫描包: ${scanPackages.joinToString()}")
+        }
+
+        var scanned = 0
+        for (javaClass in candidateClasses) {
             val definition = BeanContainer.getScanner().scan(javaClass) ?: continue
             if (BeanContainer.getRegistry().contains(definition.name)) continue
 

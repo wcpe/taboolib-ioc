@@ -22,6 +22,13 @@ class CycleResolver {
     }
 
     /**
+     * 移除 Bean 实例。
+     */
+    fun removeSingleton(name: String) {
+        singletonObjects.remove(name)
+    }
+
+    /**
      * 清空缓存
      */
     fun clear() {

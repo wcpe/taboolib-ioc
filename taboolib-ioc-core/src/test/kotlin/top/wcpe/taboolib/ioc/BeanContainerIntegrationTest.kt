@@ -4,16 +4,23 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNotSame
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import top.wcpe.taboolib.ioc.annotation.Component
 import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.annotation.Lazy
 import top.wcpe.taboolib.ioc.annotation.Named
 import top.wcpe.taboolib.ioc.annotation.PostConstruct
+import top.wcpe.taboolib.ioc.annotation.Prototype
 import top.wcpe.taboolib.ioc.annotation.Resource
+import top.wcpe.taboolib.ioc.annotation.Scope
 import top.wcpe.taboolib.ioc.bean.BeanContainer
+import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.BeanScope
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
+import java.util.concurrent.ConcurrentHashMap
 
 class BeanContainerIntegrationTest {
 
@@ -25,6 +32,9 @@ class BeanContainerIntegrationTest {
         ContainerFieldCycleLeft.ready = false
         ContainerFieldCycleRight.ready = false
         ContainerMaskedConsumer.ready = false
+        LazyContainerService.constructed = 0
+        PrototypeContainerBean.constructed = 0
+        ConversationScopedBean.constructed = 0
     }
 
     @Test
@@ -103,6 +113,60 @@ class BeanContainerIntegrationTest {
             ),
             exception.dependencyChain
         )
+    }
+
+    @Test
+    fun `bean container should delay lazy singletons and create prototype beans per request`() {
+        registerScanned(LazyContainerService::class.java)
+        registerScanned(PrototypeContainerBean::class.java)
+
+        BeanContainer.initialize()
+
+        assertEquals(0, LazyContainerService.constructed)
+        assertEquals(0, PrototypeContainerBean.constructed)
+
+        val lazyFirst = BeanContainer.getBean(LazyContainerService::class.java)
+        val lazySecond = BeanContainer.getBean(LazyContainerService::class.java)
+        val prototypeFirst = BeanContainer.getBean(PrototypeContainerBean::class.java)
+        val prototypeSecond = BeanContainer.getBean(PrototypeContainerBean::class.java)
+
+        assertNotNull(lazyFirst)
+        assertSame(lazyFirst, lazySecond)
+        assertEquals(1, LazyContainerService.constructed)
+        assertNotNull(prototypeFirst)
+        assertNotNull(prototypeSecond)
+        assertNotSame(prototypeFirst, prototypeSecond)
+        assertEquals(2, PrototypeContainerBean.constructed)
+        assertEquals(1, prototypeFirst?.instanceId)
+        assertEquals(2, prototypeSecond?.instanceId)
+    }
+
+    @Test
+    fun `bean container should delegate custom scopes`() {
+        registerScanned(ConversationScopedBean::class.java)
+
+        val cache = ConcurrentHashMap<String, Any>()
+        var created = 0
+        BeanContainer.registerScope("conversation", object : BeanScope {
+            override fun get(name: String, definition: BeanDefinition, creator: () -> Any): Any {
+                return cache.getOrPut(name) {
+                    created++
+                    creator()
+                }
+            }
+        })
+
+        BeanContainer.initialize()
+
+        assertEquals(0, ConversationScopedBean.constructed)
+
+        val first = BeanContainer.getBean(ConversationScopedBean::class.java)
+        val second = BeanContainer.getBean(ConversationScopedBean::class.java)
+
+        assertNotNull(first)
+        assertSame(first, second)
+        assertEquals(1, created)
+        assertEquals(1, ConversationScopedBean.constructed)
     }
 
     private fun registerScanned(clazz: Class<*>) {
@@ -260,3 +324,45 @@ private class ContainerConstructorCycleLeft @Inject constructor(
 private class ContainerConstructorCycleRight @Inject constructor(
     val left: ContainerConstructorCycleLeft
 )
+
+@Component
+@Lazy
+private class LazyContainerService {
+
+    companion object {
+        var constructed = 0
+    }
+
+    init {
+        constructed++
+    }
+}
+
+@Component
+@Prototype
+private class PrototypeContainerBean {
+
+    companion object {
+        var constructed = 0
+    }
+
+    val instanceId: Int = nextId()
+
+    private fun nextId(): Int {
+        constructed += 1
+        return constructed
+    }
+}
+
+@Component
+@Scope("conversation")
+private class ConversationScopedBean {
+
+    companion object {
+        var constructed = 0
+    }
+
+    init {
+        constructed++
+    }
+}
