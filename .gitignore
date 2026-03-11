@@ -123,4 +123,5 @@ bin/
 .claude/settings.local.json
 .gradle-local/
 .gradle-verify/
-
+.narrafork/
+.worktrees/
