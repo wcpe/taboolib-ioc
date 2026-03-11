@@ -1,11 +1,11 @@
 package top.wcpe.taboolib.ioc.lifecycle
 
-import taboolib.common.Inject as TabooLibInject
 import taboolib.common.LifeCycle
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.registerLifeCycleTask
 import top.wcpe.taboolib.ioc.bean.BeanContainer
+import taboolib.common.Inject as TabooLibInject
 
 /**
  * 容器生命周期管理，集成 Taboolib 生命周期

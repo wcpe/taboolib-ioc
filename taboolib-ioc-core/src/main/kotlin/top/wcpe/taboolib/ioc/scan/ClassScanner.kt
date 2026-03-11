@@ -10,7 +10,6 @@ import top.wcpe.taboolib.ioc.util.KotlinPropertyAnnotations.hasAnnotation
  * 类扫描器 - 解析类的元数据并创建 BeanDefinition
  */
 class ClassScanner(
-    private val registry: BeanRegistry,
     private val constructorResolver: ConstructorResolver
 ) {
 
@@ -93,11 +92,9 @@ class ClassScanner(
         }
 
         return constructor.parameterTypes.mapIndexed { index, type ->
-            val annotations = constructor.parameterAnnotations[index]
-            val named = annotations.filterIsInstance<Named>().firstOrNull()
             InjectParameter(
                 type = type,
-                nameQualifier = named?.value?.takeIf { it.isNotEmpty() }
+                nameQualifier = ConstructorQualifierResolver.resolve(constructor, index)
             )
         }
     }

@@ -1,12 +1,12 @@
 package top.wcpe.taboolib.ioc.scan
 
-import taboolib.common.Inject as TabooLibInject
 import taboolib.common.LifeCycle
 import taboolib.common.inject.ClassVisitor
 import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import top.wcpe.taboolib.ioc.bean.BeanContainer
+import taboolib.common.Inject as TabooLibInject
 
 /**
  * 在 ENABLE 阶段主动扫描插件 Jar 内的组件类。

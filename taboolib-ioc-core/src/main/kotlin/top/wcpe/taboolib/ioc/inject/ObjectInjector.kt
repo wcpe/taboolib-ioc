@@ -1,15 +1,16 @@
 package top.wcpe.taboolib.ioc.inject
 
-import taboolib.common.Inject as TabooLibInject
 import taboolib.common.LifeCycle
 import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.registerLifeCycleTask
-import top.wcpe.taboolib.ioc.annotation.*
+import top.wcpe.taboolib.ioc.annotation.Named
+import top.wcpe.taboolib.ioc.annotation.Resource
 import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.util.KotlinPropertyAnnotations.findAnnotation
 import top.wcpe.taboolib.ioc.util.KotlinPropertyAnnotations.hasAnnotation
+import taboolib.common.Inject as TabooLibInject
 
 /**
  * object 类自动注入器

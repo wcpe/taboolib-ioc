@@ -2,9 +2,9 @@ package top.wcpe.ioc.example.support
 
 import top.wcpe.taboolib.ioc.annotation.Component
 import top.wcpe.taboolib.ioc.annotation.Inject
-import top.wcpe.taboolib.ioc.bean.BeanRegistry
+import top.wcpe.taboolib.ioc.annotation.Named
 import top.wcpe.taboolib.ioc.bean.BeanContainer
-import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
+import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
@@ -21,17 +21,12 @@ object ExampleCycleShowcase {
         return "${left.snapshot()}|${right.snapshot()}"
     }
 
-    fun constructorCycleSummary(): String {
-        val context = LocalCycleContext()
-        return try {
-            context.register(ExampleConstructorCycleLeft::class.java)
-            context.register(ExampleConstructorCycleRight::class.java)
-            context.lifecycleManager.initialize()
-            "missing"
-        } catch (ex: CircularDependencyException) {
-            ex.dependencyChain.joinToString(" -> ")
-        }
+    fun interfaceNamedConstructorSummary(): String {
+        val contract = BeanContainer.getBean(ExampleMaskedContract::class.java) ?: return "missing-contract"
+        val consumer = BeanContainer.getBean(ExampleMaskedConsumer::class.java) ?: return "missing-consumer"
+        return "${contract.describe()}|${consumer.snapshot()}"
     }
+
 }
 
 @Component
@@ -56,6 +51,52 @@ class ExampleFieldCycleRight {
     fun label(): String = "right"
 }
 
+interface ExampleMaskedStoreContract {
+    fun source(): String
+}
+
+interface ExampleMaskedSettingsContract {
+    fun mode(): String
+}
+
+interface ExampleMaskedContract {
+    fun describe(): String
+}
+
+@Component("maskedStore")
+class ExampleMaskedStore : ExampleMaskedStoreContract {
+    override fun source(): String = "masked-store"
+}
+
+@Component
+class ExampleMaskedSettings : ExampleMaskedSettingsContract {
+    override fun mode(): String = "masked-settings"
+}
+
+@Component
+class ExampleMaskedServiceImpl @Inject constructor(
+    @Named("maskedStore")
+    private val repository: ExampleMaskedStoreContract,
+    private val configProvider: ExampleMaskedSettingsContract
+) : ExampleMaskedContract {
+
+    override fun describe(): String {
+        return "${repository.source()}|${configProvider.mode()}"
+    }
+}
+
+@Component
+class ExampleMaskedConsumer {
+
+    @Inject
+    lateinit var service: ExampleMaskedContract
+        private set
+
+    fun snapshot(): String {
+        return service.describe()
+    }
+}
+
 private class LocalCycleContext {
 
     private val registry = BeanRegistry()
@@ -67,7 +108,7 @@ private class LocalCycleContext {
     }
     private val injector = Injector(registry, cycleResolver, fieldInjector)
     val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
-    private val scanner = ClassScanner(registry, constructorResolver)
+    private val scanner = ClassScanner(constructorResolver)
 
     fun register(clazz: Class<*>) {
         val definition = scanner.scan(clazz) ?: error("scan failed for ${clazz.name}")
@@ -100,5 +141,4 @@ private class ExampleConstructorCycleLeft @Inject constructor(
 
 @Component
 private class ExampleConstructorCycleRight @Inject constructor(
-    val left: ExampleConstructorCycleLeft
 )

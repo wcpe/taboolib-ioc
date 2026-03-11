@@ -42,7 +42,7 @@ object BeanContainer {
     private val cycleDetector = CycleDetector()
     private val cycleResolver = CycleResolver()
     private val constructorResolver = ConstructorResolver()
-    private val scanner = ClassScanner(registry, constructorResolver)
+    private val scanner = ClassScanner(constructorResolver)
     private val fieldInjector = FieldInjector(registry) { type, name ->
         getBean(type, name)
     }

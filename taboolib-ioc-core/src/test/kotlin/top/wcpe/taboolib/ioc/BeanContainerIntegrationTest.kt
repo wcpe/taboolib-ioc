@@ -24,6 +24,7 @@ class BeanContainerIntegrationTest {
         ContainerCycleAwareService.postConstructSnapshot = ""
         ContainerFieldCycleLeft.ready = false
         ContainerFieldCycleRight.ready = false
+        ContainerMaskedConsumer.ready = false
     }
 
     @Test
@@ -31,12 +32,20 @@ class BeanContainerIntegrationTest {
         registerScanned(ContainerPrimaryGateway::class.java)
         registerScanned(ContainerSecondaryGateway::class.java)
         registerScanned(ContainerCycleAwareService::class.java)
+        registerScanned(ContainerFieldTargetNamedService::class.java)
+        registerScanned(ContainerMaskedStore::class.java)
+        registerScanned(ContainerMaskedSettings::class.java)
+        registerScanned(ContainerMaskedServiceImpl::class.java)
+        registerScanned(ContainerMaskedConsumer::class.java)
         BeanContainer.registerBean("containerManualValue", ContainerManualValue("manual-ready"))
 
         BeanContainer.initialize()
 
         val serviceByType = BeanContainer.getBean(ContainerCycleAwareService::class.java)
         val serviceByName = BeanContainer.getBean(ContainerCycleAwareService::class.java, "containerCycleAwareService")
+        val fieldTargetNamedService = BeanContainer.getBean(ContainerFieldTargetNamedService::class.java)
+        val maskedContract = BeanContainer.getBean(ContainerMaskedContract::class.java)
+        val maskedConsumer = BeanContainer.getBean(ContainerMaskedConsumer::class.java)
         val gatewayByName = BeanContainer.getBean(ContainerGateway::class.java, "primaryContainerGateway")
         val manualValue = BeanContainer.getBean(ContainerManualValue::class.java, "containerManualValue")
         val allGateways = BeanContainer.getBeansOfType(ContainerGateway::class.java)
@@ -45,6 +54,10 @@ class BeanContainerIntegrationTest {
 
         assertNotNull(serviceByType)
         assertSame(serviceByType, serviceByName)
+        assertEquals("primary", fieldTargetNamedService?.repositoryId())
+        assertEquals("masked-store|masked-settings", maskedContract?.describe())
+        assertEquals("masked-store|masked-settings", maskedConsumer?.service?.describe())
+        assertEquals(true, ContainerMaskedConsumer.ready)
         assertEquals("primary", gatewayByName?.id())
         assertEquals("manual-ready", manualValue?.value)
         assertEquals(listOf("primary", "secondary"), allGateways)
@@ -143,6 +156,66 @@ private class ContainerCycleAwareService @Inject constructor(
     @PostConstruct
     fun afterInject() {
         postConstructSnapshot = "${constructorGateway.id()}|${fieldGateway.id()}|$methodInjected"
+    }
+}
+
+@Component
+private class ContainerFieldTargetNamedService @Inject constructor(
+    @field:Named("primaryContainerGateway")
+    private val repository: ContainerGateway
+) {
+
+    fun repositoryId(): String = repository.id()
+}
+
+private interface ContainerMaskedStoreContract {
+    fun source(): String
+}
+
+private interface ContainerMaskedSettingsContract {
+    fun mode(): String
+}
+
+private interface ContainerMaskedContract {
+    fun describe(): String
+}
+
+@Component("maskedStore")
+private class ContainerMaskedStore : ContainerMaskedStoreContract {
+    override fun source(): String = "masked-store"
+}
+
+@Component
+private class ContainerMaskedSettings : ContainerMaskedSettingsContract {
+    override fun mode(): String = "masked-settings"
+}
+
+@Component
+private class ContainerMaskedServiceImpl @Inject constructor(
+    @Named("maskedStore")
+    private val repository: ContainerMaskedStoreContract,
+    private val configProvider: ContainerMaskedSettingsContract
+) : ContainerMaskedContract {
+
+    override fun describe(): String {
+        return "${repository.source()}|${configProvider.mode()}"
+    }
+}
+
+@Component
+private class ContainerMaskedConsumer {
+
+    companion object {
+        var ready = false
+    }
+
+    @Inject
+    lateinit var service: ContainerMaskedContract
+        private set
+
+    @PostConstruct
+    fun afterInject() {
+        ready = this::service.isInitialized && service.describe() == "masked-store|masked-settings"
     }
 }
 

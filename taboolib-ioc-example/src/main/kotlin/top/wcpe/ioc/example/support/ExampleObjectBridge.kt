@@ -1,9 +1,9 @@
 package top.wcpe.ioc.example.support
 
-import top.wcpe.taboolib.ioc.annotation.Inject
-import top.wcpe.taboolib.ioc.annotation.Named
 import top.wcpe.ioc.example.gateway.ExampleGateway
 import top.wcpe.ioc.example.service.ExampleReportService
+import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.annotation.Named
 
 object ExampleObjectBridge {
 

@@ -1,15 +1,10 @@
 package top.wcpe.ioc.example.service
 
 import taboolib.common.platform.function.info
-import top.wcpe.taboolib.ioc.annotation.Inject
-import top.wcpe.taboolib.ioc.annotation.Named
-import top.wcpe.taboolib.ioc.annotation.PostConstruct
-import top.wcpe.taboolib.ioc.annotation.PreDestroy
-import top.wcpe.taboolib.ioc.annotation.Resource
-import top.wcpe.taboolib.ioc.annotation.Service
 import top.wcpe.ioc.example.component.ExampleTextComponent
 import top.wcpe.ioc.example.gateway.ExampleGateway
 import top.wcpe.ioc.example.repository.ExampleUserRepository
+import top.wcpe.taboolib.ioc.annotation.*
 
 @Service
 class ExampleReportService @Inject constructor(

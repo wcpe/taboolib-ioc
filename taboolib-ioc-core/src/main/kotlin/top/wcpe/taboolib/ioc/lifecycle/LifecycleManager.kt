@@ -3,8 +3,8 @@ package top.wcpe.taboolib.ioc.lifecycle
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
-import top.wcpe.taboolib.ioc.bean.InjectParameter
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
+import top.wcpe.taboolib.ioc.bean.InjectParameter
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver

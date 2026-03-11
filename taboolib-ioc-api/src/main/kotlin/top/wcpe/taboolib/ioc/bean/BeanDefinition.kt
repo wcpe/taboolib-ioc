@@ -1,6 +1,5 @@
 package top.wcpe.taboolib.ioc.bean
 
-import top.wcpe.taboolib.ioc.annotation.Named
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 
@@ -62,11 +61,9 @@ class BeanDefinition(
             }
 
             return constructor.parameterTypes.mapIndexed { index, type ->
-                val annotations = constructor.parameterAnnotations[index]
-                val named = annotations.filterIsInstance<Named>().firstOrNull()
                 InjectParameter(
                     type = type,
-                    nameQualifier = named?.value?.takeIf { it.isNotEmpty() }
+                    nameQualifier = ConstructorQualifierResolver.resolve(constructor, index)
                 )
             }
         }

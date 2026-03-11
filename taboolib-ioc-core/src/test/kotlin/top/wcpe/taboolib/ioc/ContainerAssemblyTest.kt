@@ -105,7 +105,7 @@ private class TestContext {
     }
     private val injector = Injector(registry, cycleResolver, fieldInjector)
     val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
-    private val scanner = ClassScanner(registry, constructorResolver)
+    private val scanner = ClassScanner(constructorResolver)
 
     fun scan(clazz: Class<*>) = scanner.scan(clazz) ?: error("scan failed for ${clazz.name}")
 

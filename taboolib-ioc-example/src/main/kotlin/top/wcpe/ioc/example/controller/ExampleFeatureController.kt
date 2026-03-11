@@ -1,14 +1,14 @@
 package top.wcpe.ioc.example.controller
 
-import top.wcpe.taboolib.ioc.annotation.Controller
-import top.wcpe.taboolib.ioc.annotation.Inject
-import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.ioc.example.component.ExampleTextComponent
 import top.wcpe.ioc.example.gateway.ExampleGateway
 import top.wcpe.ioc.example.model.ExampleManualToken
 import top.wcpe.ioc.example.service.ExampleReportService
 import top.wcpe.ioc.example.support.ExampleCycleShowcase
 import top.wcpe.ioc.example.support.ExampleObjectBridge
+import top.wcpe.taboolib.ioc.annotation.Controller
+import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.bean.BeanContainer
 
 @Controller
 class ExampleFeatureController @Inject constructor(
@@ -40,8 +40,13 @@ class ExampleFeatureController @Inject constructor(
             add(textComponent.line("getBeanNames", beanNames))
             add(textComponent.line("registerBean", manualToken))
             add(textComponent.line("objectInjection", ExampleObjectBridge.snapshot()))
+            add(
+                textComponent.line(
+                    "interfaceNamedConstructorInjection",
+                    ExampleCycleShowcase.interfaceNamedConstructorSummary()
+                )
+            )
             add(textComponent.line("fieldCircularInjection", ExampleCycleShowcase.fieldCycleSummary()))
-            add(textComponent.line("constructorCycleDetection", ExampleCycleShowcase.constructorCycleSummary()))
         }
     }
 }
