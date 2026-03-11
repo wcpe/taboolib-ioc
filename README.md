@@ -6,8 +6,10 @@
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
 - 依赖注入：构造函数、字段、方法注入
+- 两阶段装配：扫描期注册元数据，`ACTIVE` 阶段统一实例化与注入
 - 名称限定：`@Named`、`@Resource`
 - 生命周期：`@PostConstruct`、`@PreDestroy`
+- 循环依赖检测：字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
 - Kotlin `object` 自动注入
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
 - 手动注册单例：`registerBean`
@@ -116,6 +118,8 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 - `@Service` 字段注入
 - `@Resource` 方法注入
 - `@Named` 名称限定注入
+- 字段循环依赖示例
+- 构造函数循环依赖检测示例
 - `@PostConstruct` / `@PreDestroy`
 - Kotlin `object` 自动注入
 - `BeanContainer` 全部公开查询/注册方法
@@ -123,9 +127,10 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 
 核心入口见：
 
-- `taboolib-ioc-example/src/main/kotlin/top/wcpe/taboolib/ioc/example/ExamplePlugin.kt`
-- `taboolib-ioc-example/src/main/kotlin/top/wcpe/taboolib/ioc/example/controller/ExampleFeatureController.kt`
-- `taboolib-ioc-example/src/main/kotlin/top/wcpe/taboolib/ioc/example/service/ExampleReportService.kt`
+- `taboolib-ioc-example/src/main/kotlin/top/wcpe/ioc/example/ExamplePlugin.kt`
+- `taboolib-ioc-example/src/main/kotlin/top/wcpe/ioc/example/controller/ExampleFeatureController.kt`
+- `taboolib-ioc-example/src/main/kotlin/top/wcpe/ioc/example/service/ExampleReportService.kt`
+- `taboolib-ioc-example/src/main/kotlin/top/wcpe/ioc/example/support/ExampleCycleShowcase.kt`
 
 预期启动日志包含：
 
@@ -142,6 +147,8 @@ getBeansOfType=alipay,wechat
 containsBean=true
 registerBean=manual-ready
 objectInjection=ioc-ready|wechat|wechat
+fieldCircularInjection=left->right|right->left
+constructorCycleDetection=exampleConstructorCycleLeft -> exampleConstructorCycleRight -> exampleConstructorCycleLeft
 ```
 
 关闭插件时还会看到：
@@ -155,3 +162,4 @@ ExampleReportService 销毁前回调
 - Kotlin 属性注入直接写 `@Inject lateinit var foo: Foo` 即可，不需要强制改成 `@field:Inject`
 - 如果依赖类型存在多个实现，优先用 `@Named` 或 `@Resource(name = ...)`
 - 如果构造函数不止一个，显式写 `@Inject constructor(...)`
+- 字段或方法形成的循环依赖会在两阶段装配里完成；构造函数循环依赖会在初始化阶段直接失败

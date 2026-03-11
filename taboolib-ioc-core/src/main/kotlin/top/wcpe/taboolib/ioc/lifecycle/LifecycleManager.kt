@@ -3,8 +3,10 @@ package top.wcpe.taboolib.ioc.lifecycle
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.InjectParameter
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
+import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.Injector
 
@@ -18,7 +20,8 @@ import top.wcpe.taboolib.ioc.inject.Injector
 class LifecycleManager(
     private val registry: BeanRegistry,
     private val cycleResolver: CycleResolver,
-    private val injector: Injector
+    private val injector: Injector,
+    private val cycleDetector: CycleDetector
 ) {
 
     // 保存初始化顺序，用于逆序销毁
@@ -29,6 +32,8 @@ class LifecycleManager(
      */
     fun initialize() {
         val definitions = registry.getAll().toList()
+        ensureConstructorCyclesResolved(definitions)
+        logResolvableDependencyCycles(definitions)
         val constructorOrder = topologicalSortByConstructor(definitions)
         val lifecycleOrder = topologicalSortByDependencies(definitions)
 
@@ -47,7 +52,7 @@ class LifecycleManager(
         }
 
         for (definition in constructorOrder) {
-            val instance = cycleResolver.getSingleton(definition.name).first ?: continue
+            val instance = cycleResolver.getSingleton(definition.name) ?: continue
             try {
                 injector.populate(instance, definition)
                 debug("[IoC] Bean 依赖装配完成: ${definition.name}")
@@ -59,7 +64,7 @@ class LifecycleManager(
 
         debug("[IoC] 生命周期回调顺序: ${lifecycleOrder.map { it.name }}")
         for (definition in lifecycleOrder) {
-            val instance = cycleResolver.getSingleton(definition.name).first ?: continue
+            val instance = cycleResolver.getSingleton(definition.name) ?: continue
             try {
                 injector.invokePostConstruct(instance, definition)
                 initializationOrder.add(definition.name)
@@ -83,7 +88,7 @@ class LifecycleManager(
         for (name in initializationOrder.reversed()) {
             val definition = registry.getByName(name) ?: continue
             try {
-                definition.preDestroy?.invoke(cycleResolver.getSingleton(name).first)
+                definition.preDestroy?.invoke(cycleResolver.getSingleton(name))
                 debug("[IoC] Bean 销毁完成: $name")
             } catch (e: Exception) {
                 warning("[IoC] Bean 销毁失败: $name - ${e.message}")
@@ -97,27 +102,18 @@ class LifecycleManager(
     private fun topologicalSortByConstructor(definitions: List<BeanDefinition>): List<BeanDefinition> {
         val definitionByName = definitions.associateBy { it.name }
         val visited = mutableSetOf<String>()
-        val visiting = mutableListOf<String>()
         val sorted = mutableListOf<BeanDefinition>()
 
         fun visit(definition: BeanDefinition) {
             if (definition.name in visited) {
                 return
             }
-            val visitingIndex = visiting.indexOf(definition.name)
-            if (visitingIndex >= 0) {
-                val chain = visiting.subList(visitingIndex, visiting.size) + definition.name
-                throw CircularDependencyException(definition.name, chain)
-            }
-
-            visiting += definition.name
             definition.constructorParameters.forEach { dependency ->
                 val dependencyDefinition = resolveDependencyDefinition(dependency.type, dependency.nameQualifier, definitionByName)
                 if (dependencyDefinition != null && dependencyDefinition.name != definition.name) {
                     visit(dependencyDefinition)
                 }
             }
-            visiting.remove(definition.name)
             visited += definition.name
             sorted += definition
         }
@@ -165,6 +161,43 @@ class LifecycleManager(
             definitionByName[name]
         } else {
             registry.getPrimaryByType(type)
+        }
+    }
+
+    private fun ensureConstructorCyclesResolved(definitions: List<BeanDefinition>) {
+        val definitionByName = definitions.associateBy { it.name }
+        val cycle = cycleDetector.findFirstCycle(
+            nodes = definitions,
+            nameOf = { it.name },
+            dependenciesOf = { definition ->
+                resolveDependencyDefinitions(definition.constructorParameters, definitionByName)
+            }
+        ) ?: return
+
+        throw CircularDependencyException(cycle.last(), cycle)
+    }
+
+    private fun logResolvableDependencyCycles(definitions: List<BeanDefinition>) {
+        val definitionByName = definitions.associateBy { it.name }
+        val cycles = cycleDetector.findCycles(
+            nodes = definitions,
+            nameOf = { it.name },
+            dependenciesOf = { definition ->
+                resolveDependencyDefinitions(definition.dependencies, definitionByName)
+            }
+        )
+
+        cycles.forEach { cycle ->
+            debug("[IoC] 检测到可由两阶段装配处理的循环依赖: ${cycle.joinToString(" -> ")}")
+        }
+    }
+
+    private fun resolveDependencyDefinitions(
+        dependencies: List<InjectParameter>,
+        definitionByName: Map<String, BeanDefinition>
+    ): List<BeanDefinition> {
+        return dependencies.mapNotNull { dependency ->
+            resolveDependencyDefinition(dependency.type, dependency.nameQualifier, definitionByName)
         }
     }
 }

@@ -7,6 +7,7 @@ import top.wcpe.ioc.example.component.ExampleTextComponent
 import top.wcpe.ioc.example.gateway.ExampleGateway
 import top.wcpe.ioc.example.model.ExampleManualToken
 import top.wcpe.ioc.example.service.ExampleReportService
+import top.wcpe.ioc.example.support.ExampleCycleShowcase
 import top.wcpe.ioc.example.support.ExampleObjectBridge
 
 @Controller
@@ -39,6 +40,8 @@ class ExampleFeatureController @Inject constructor(
             add(textComponent.line("getBeanNames", beanNames))
             add(textComponent.line("registerBean", manualToken))
             add(textComponent.line("objectInjection", ExampleObjectBridge.snapshot()))
+            add(textComponent.line("fieldCircularInjection", ExampleCycleShowcase.fieldCycleSummary()))
+            add(textComponent.line("constructorCycleDetection", ExampleCycleShowcase.constructorCycleSummary()))
         }
     }
 }

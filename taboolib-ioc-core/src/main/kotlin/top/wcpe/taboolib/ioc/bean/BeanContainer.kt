@@ -2,6 +2,7 @@ package top.wcpe.taboolib.ioc.bean
 
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
+import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
 import top.wcpe.taboolib.ioc.inject.FieldInjector
@@ -38,6 +39,7 @@ object BeanContainer {
 
     private val registry = BeanRegistry()
     private val manualBeansByName = ConcurrentHashMap<String, Any>()
+    private val cycleDetector = CycleDetector()
     private val cycleResolver = CycleResolver()
     private val constructorResolver = ConstructorResolver()
     private val scanner = ClassScanner(registry, constructorResolver)
@@ -47,7 +49,7 @@ object BeanContainer {
     private val injector = Injector(
         registry, cycleResolver, fieldInjector
     )
-    private val lifecycleManager = LifecycleManager(registry, cycleResolver, injector)
+    private val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
 
     /**
      * 容器是否已初始化。
@@ -179,6 +181,14 @@ object BeanContainer {
      */
     internal fun getScanner(): ClassScanner = scanner
 
+    internal fun resetForTesting() {
+        cycleResolver.clear()
+        registry.clear()
+        manualBeansByName.clear()
+        initialized = false
+        initializing = false
+    }
+
     private fun resolveBean(type: Class<*>, name: String?): Any? {
         val definition = if (name != null) {
             registry.getByName(name)
@@ -190,7 +200,7 @@ object BeanContainer {
             return null
         }
 
-        return cycleResolver.getSingleton(definition.name).first
+        return cycleResolver.getSingleton(definition.name)
     }
 
     private fun resolveManualBean(type: Class<*>): Any? {

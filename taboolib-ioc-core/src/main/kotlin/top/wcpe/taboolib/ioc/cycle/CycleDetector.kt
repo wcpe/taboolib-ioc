@@ -1,40 +1,68 @@
 package top.wcpe.taboolib.ioc.cycle
 
-import java.util.concurrent.ConcurrentHashMap
-
 /**
- * 循环依赖检测器 - 检测构造函数注入的循环依赖
+ * 依赖图循环检测器。
  */
 class CycleDetector {
 
-    private val creating = ConcurrentHashMap<String, Unit>()
-    private val dependencyChain = mutableListOf<String>()
+    fun <T> findFirstCycle(
+        nodes: Collection<T>,
+        nameOf: (T) -> String,
+        dependenciesOf: (T) -> Collection<T>
+    ): List<String>? {
+        return findCycles(nodes, nameOf, dependenciesOf).firstOrNull()
+    }
 
-    /**
-     * 标记 Bean 开始创建
-     * @throws CircularDependencyException 如果检测到构造函数循环依赖
-     */
-    fun beginCreation(beanName: String, isConstructorInjection: Boolean) {
-        if (isConstructorInjection && creating.containsKey(beanName)) {
-            throw CircularDependencyException(beanName, dependencyChain + beanName)
+    fun <T> findCycles(
+        nodes: Collection<T>,
+        nameOf: (T) -> String,
+        dependenciesOf: (T) -> Collection<T>
+    ): List<List<String>> {
+        val visiting = mutableListOf<String>()
+        val visited = mutableSetOf<String>()
+        val cycles = linkedMapOf<String, List<String>>()
+
+        fun visit(node: T) {
+            val nodeName = nameOf(node)
+            val visitingIndex = visiting.indexOf(nodeName)
+            if (visitingIndex >= 0) {
+                val cycle = visiting.subList(visitingIndex, visiting.size) + nodeName
+                cycles[canonicalKey(cycle)] = normalizeCycle(cycle)
+                return
+            }
+            if (!visited.add(nodeName)) {
+                return
+            }
+
+            visiting += nodeName
+            dependenciesOf(node).forEach(::visit)
+            visiting.removeAt(visiting.lastIndex)
         }
-        creating[beanName] = Unit
-        dependencyChain.add(beanName)
+
+        nodes.forEach(::visit)
+        return cycles.values.toList()
     }
 
-    /**
-     * 标记 Bean 创建完成
-     */
-    fun endCreation(beanName: String) {
-        creating.remove(beanName)
-        dependencyChain.remove(beanName)
+    private fun normalizeCycle(cycle: List<String>): List<String> {
+        val normalized = normalizedCore(cycle)
+        return normalized + normalized.first()
     }
 
-    /**
-     * 清空状态
-     */
-    fun clear() {
-        creating.clear()
-        dependencyChain.clear()
+    private fun canonicalKey(cycle: List<String>): String {
+        return normalizedCore(cycle).joinToString("->")
+    }
+
+    private fun normalizedCore(cycle: List<String>): List<String> {
+        val core = if (cycle.size > 1 && cycle.first() == cycle.last()) {
+            cycle.dropLast(1)
+        } else {
+            cycle
+        }
+        if (core.isEmpty()) {
+            return emptyList()
+        }
+        return core.indices
+            .map { index -> core.drop(index) + core.take(index) }
+            .minBy { it.joinToString("->") }
     }
 }

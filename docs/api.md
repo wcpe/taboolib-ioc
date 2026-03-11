@@ -186,6 +186,12 @@ annotation class PreDestroy
 - 方法无参数
 - 一个类最多保留一个有效方法
 
+## 循环依赖
+
+- 字段注入和方法注入形成的循环依赖会在两阶段装配中完成
+- 构造函数循环依赖会在 `ACTIVE` 初始化阶段抛出 `CircularDependencyException`
+- 异常会携带完整依赖链，便于快速定位问题
+
 ## `BeanContainer`
 
 ### `getBean(type, name?)`
@@ -275,6 +281,7 @@ val value = BeanContainer.getBean(ManualValue::class.java, "manualValue")
 ### 容器初始化时机
 
 - 容器在 `ACTIVE` 前置任务中初始化
+- 初始化采用两阶段装配：先实例化，再统一执行字段/方法注入与 `@PostConstruct`
 - Kotlin `object` 注入在容器初始化之后、用户 `@Awake(ACTIVE)` 之前执行
 
 ## 构造函数解析规则
@@ -325,6 +332,8 @@ object PluginState {
 - `@Inject` 方法注入
 - `@Resource(name = ...)` 方法注入
 - `@Named` 名称限定
+- 字段循环依赖示例
+- 构造函数循环依赖检测示例
 - `@PostConstruct` / `@PreDestroy`
 - Kotlin `object` 自动注入
 - `getBean` / `getBeansOfType` / `containsBean` / `getBeanNames` / `registerBean`

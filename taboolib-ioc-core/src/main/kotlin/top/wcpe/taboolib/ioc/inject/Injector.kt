@@ -17,10 +17,8 @@ class Injector(
      * 创建 Bean 实例，但不执行字段/方法注入。
      */
     fun instantiate(definition: BeanDefinition): Any {
-        cycleResolver.getSingleton(definition.name).let { (instance, _) ->
-            if (instance != null) {
-                return instance
-            }
+        cycleResolver.getSingleton(definition.name)?.let { instance ->
+            return instance
         }
 
         val constructorArgs = resolveConstructorArgs(definition)
@@ -60,8 +58,8 @@ class Injector(
      */
     private fun resolveBean(type: Class<*>, name: String?): Any? {
         if (name != null) {
-            cycleResolver.getSingleton(name).let { (instance, _) ->
-                if (instance != null && type.isInstance(instance)) {
+            cycleResolver.getSingleton(name)?.let { instance ->
+                if (type.isInstance(instance)) {
                     return instance
                 }
             }
@@ -73,8 +71,8 @@ class Injector(
             registry.getPrimaryByType(type)
         } ?: return null
 
-        cycleResolver.getSingleton(definition.name).let { (instance, _) ->
-            if (instance != null && type.isInstance(instance)) return instance
+        cycleResolver.getSingleton(definition.name)?.let { instance ->
+            if (type.isInstance(instance)) return instance
         }
 
         return null

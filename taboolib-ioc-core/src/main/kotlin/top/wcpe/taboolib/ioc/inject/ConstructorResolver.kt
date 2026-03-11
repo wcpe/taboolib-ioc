@@ -36,11 +36,4 @@ class ConstructorResolver {
 
         throw NoSuchMethodException("No suitable constructor found for ${clazz.name}, please mark one with @Inject")
     }
-
-    /**
-     * 判断是否为构造函数注入（有参数）
-     */
-    fun isConstructorInjection(constructor: Constructor<*>): Boolean {
-        return constructor.parameterCount > 0
-    }
 }

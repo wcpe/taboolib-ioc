@@ -13,6 +13,7 @@ import top.wcpe.taboolib.ioc.annotation.Resource
 import top.wcpe.taboolib.ioc.annotation.Service
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
+import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
 import top.wcpe.taboolib.ioc.inject.FieldInjector
@@ -97,12 +98,13 @@ private class TestContext {
 
     val registry = BeanRegistry()
     private val cycleResolver = CycleResolver()
+    private val cycleDetector = CycleDetector()
     private val constructorResolver = ConstructorResolver()
     private val fieldInjector = FieldInjector(registry) { type, name ->
         resolveExistingBean(type, name)
     }
     private val injector = Injector(registry, cycleResolver, fieldInjector)
-    val lifecycleManager = LifecycleManager(registry, cycleResolver, injector)
+    val lifecycleManager = LifecycleManager(registry, cycleResolver, injector, cycleDetector)
     private val scanner = ClassScanner(registry, constructorResolver)
 
     fun scan(clazz: Class<*>) = scanner.scan(clazz) ?: error("scan failed for ${clazz.name}")
@@ -112,12 +114,12 @@ private class TestContext {
     }
 
     fun getSingleton(name: String): Any? {
-        return cycleResolver.getSingleton(name).first
+        return cycleResolver.getSingleton(name)
     }
 
     private fun resolveExistingBean(type: Class<*>, name: String?): Any? {
         if (name != null) {
-            cycleResolver.getSingleton(name).first?.let { instance ->
+            cycleResolver.getSingleton(name)?.let { instance ->
                 if (type.isInstance(instance)) {
                     return instance
                 }
@@ -130,7 +132,7 @@ private class TestContext {
             registry.getPrimaryByType(type)
         } ?: return null
 
-        return cycleResolver.getSingleton(definition.name).first?.takeIf(type::isInstance)
+        return cycleResolver.getSingleton(definition.name)?.takeIf(type::isInstance)
     }
 }
 
