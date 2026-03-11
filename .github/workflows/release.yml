@@ -70,7 +70,7 @@ jobs:
         id: artifacts
         run: |
           # 主插件 JAR（排除 -sources 等附属产物）
-          MAIN_JAR=$(ls build/libs/*.jar | grep -v '\-sources\.\|plain\.' | head -n 1)
+          MAIN_JAR=$(ls taboolib-ioc-example/build/libs/*.jar | grep -v '\-sources\.\|plain\.' | head -n 1)
           echo "main_jar=${MAIN_JAR}" >> "$GITHUB_OUTPUT"
           echo "Found artifact: ${MAIN_JAR}"
 

@@ -65,37 +65,233 @@ dependencies {
 
 ## 快速开始
 
+### 1. 定义组件
+
 ```kotlin
+// 仓储层 - 使用 @Repository 标记
 @Repository
 class UserRepository {
-    fun status(): String = "ready"
+    fun findUserById(id: String): String = "User($id)"
 }
 
+// 服务层 - 使用 @Service 标记，构造函数注入
 @Service
 class UserService @Inject constructor(
     private val repository: UserRepository
 ) {
+    fun getUser(id: String): String = repository.findUserById(id)
+}
 
+// 通用组件 - 使用 @Component 标记
+@Component
+class TextFormatter {
+    fun format(label: String, value: Any): String = "$label=$value"
+}
+```
+
+### 2. 使用依赖注入
+
+```kotlin
+@Service
+class OrderService {
+
+    // 字段注入
+    @Inject
+    lateinit var userService: UserService
+
+    // 方法注入
     @Inject
     fun bindFormatter(formatter: TextFormatter) {
         this.formatter = formatter
     }
 
-    @PostConstruct
-    fun init() {
-        println("UserService 初始化完成")
-    }
-
     private lateinit var formatter: TextFormatter
 
-    fun describe(): String {
-        return formatter.line("status", repository.status())
+    fun processOrder(userId: String): String {
+        val user = userService.getUser(userId)
+        return formatter.format("order", user)
+    }
+}
+```
+
+### 3. 名称限定注入
+
+当同一接口有多个实现时，使用 `@Named` 或 `@Resource` 指定具体实现：
+
+```kotlin
+interface PaymentGateway {
+    fun channel(): String
+}
+
+@Component("wechatGateway")
+class WechatGateway : PaymentGateway {
+    override fun channel() = "wechat"
+}
+
+@Component("alipayGateway")
+class AlipayGateway : PaymentGateway {
+    override fun channel() = "alipay"
+}
+
+@Service
+class PaymentService {
+
+    // 使用 @Named 指定注入 wechatGateway
+    @Inject
+    @Named("wechatGateway")
+    lateinit var primaryGateway: PaymentGateway
+
+    // 使用 @Resource 指定注入 alipayGateway
+    @Resource(name = "alipayGateway")
+    fun bindFallback(gateway: PaymentGateway) {
+        this.fallbackGateway = gateway
+    }
+
+    private lateinit var fallbackGateway: PaymentGateway
+}
+```
+
+### 4. 生命周期回调
+
+```kotlin
+@Service
+class LifecycleService {
+
+    @PostConstruct
+    fun onInit() {
+        println("Bean 初始化完成，依赖注入已执行")
+    }
+
+    @PreDestroy
+    fun onDestroy() {
+        println("容器关闭前执行清理")
+    }
+}
+```
+
+### 5. 从容器获取 Bean
+
+```kotlin
+// 按类型获取
+val userService = BeanContainer.getBean(UserService::class.java)
+
+// 按名称获取
+val gateway = BeanContainer.getBean(PaymentGateway::class.java, "wechatGateway")
+
+// 获取某类型的所有 Bean
+val allGateways = BeanContainer.getBeansOfType(PaymentGateway::class.java)
+
+// 检查 Bean 是否存在
+val exists = BeanContainer.containsBean("userService")
+
+// 获取所有 Bean 名称
+val names = BeanContainer.getBeanNames()
+
+// 手动注册 Bean
+BeanContainer.registerBean("manualValue", MyCustomObject("data"))
+```
+
+### 6. Kotlin object 注入
+
+```kotlin
+object PluginState {
+
+    @Inject
+    lateinit var userService: UserService
+
+    fun doSomething() {
+        userService.getUser("123")
+    }
+}
+```
+
+### 7. 作用域与懒加载
+
+```kotlin
+// 默认单例
+@Service
+class SingletonService
+
+// 每次获取都创建新实例
+@Service
+@Prototype
+class PrototypeService
+
+// 延迟初始化，首次使用时才创建
+@Service
+@Lazy
+class LazyService
+
+// 自定义作用域
+@Service
+@Scope("conversation")
+class ConversationService
+```
+
+## 完整示例
+
+以下是一个完整的插件示例，展示所有核心功能：
+
+```kotlin
+// 1. 定义仓储
+@Repository
+class UserRepository {
+    fun loadStatus(): String = "ioc-ready"
+}
+
+// 2. 定义服务，使用构造函数注入
+@Service
+class ReportService @Inject constructor(
+    private val repository: UserRepository
+) {
+    @Inject
+    @Named("wechatGateway")
+    lateinit var auditGateway: PaymentGateway
+
+    @Resource(name = "alipayGateway")
+    fun bindFallback(gateway: PaymentGateway) {
+        this.fallbackGateway = gateway
+    }
+
+    private lateinit var fallbackGateway: PaymentGateway
+
+    @PostConstruct
+    fun onInit() {
+        println("ReportService 初始化完成")
+    }
+
+    @PreDestroy
+    fun onDestroy() {
+        println("ReportService 销毁")
     }
 }
 
-@Component
-class TextFormatter {
-    fun line(label: String, value: Any): String = "$label=$value"
+// 3. 定义控制器
+@Controller
+class FeatureController @Inject constructor(
+    private val reportService: ReportService
+) {
+    fun run() {
+        // 从容器获取 Bean
+        val service = BeanContainer.getBean(ReportService::class.java)
+        val gateways = BeanContainer.getBeansOfType(PaymentGateway::class.java)
+        println("Gateways: ${gateways.map { it.channel() }}")
+    }
+}
+
+// 4. 插件入口
+object ExamplePlugin {
+
+    @Inject
+    lateinit var controller: FeatureController
+
+    @Awake(LifeCycle.ACTIVE)
+    fun onActive() {
+        // 手动注册 Bean
+        BeanContainer.registerBean("customToken", CustomToken("value"))
+        // 执行业务逻辑
+        controller.run()
+    }
 }
 ```
 
