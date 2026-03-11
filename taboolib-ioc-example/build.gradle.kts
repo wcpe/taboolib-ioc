@@ -20,6 +20,7 @@ taboolib {
         install(Basic)
         install(Bukkit)
     }
+    subproject = false
 }
 
 dependencies {

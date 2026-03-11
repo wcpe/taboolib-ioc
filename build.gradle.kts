@@ -2,6 +2,7 @@ import io.izzel.taboolib.gradle.*
 
 plugins {
     java
+    `maven-publish`
     id("io.izzel.taboolib") version "2.0.28" apply false
     kotlin("jvm") version "2.1.0" apply false
 }
@@ -38,6 +39,7 @@ subprojects {
     java {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+        withSourcesJar()
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
@@ -46,4 +48,33 @@ subprojects {
             freeCompilerArgs = listOf("-Xjvm-default=all")
         }
     }
+
+
+    publishing {
+        repositories {
+            maven {
+                credentials {
+                    username = project.findProperty("username")?.toString() ?: ""
+                    password = project.findProperty("password")?.toString() ?: ""
+                }
+                authentication {
+                    create<BasicAuthentication>("basic")
+                }
+                val releasesRepoUrl = uri("https://maven.wcpe.top/repository/maven-releases/")
+                val snapshotsRepoUrl = uri("https://maven.wcpe.top/repository/maven-snapshots/")
+                url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
+            }
+            mavenLocal()
+        }
+        publications {
+            create<MavenPublication>("maven") {
+                groupId = "${rootProject.group}"
+                artifactId = project.name
+                version = "${project.version}"
+                from(components["java"])
+                println("> Apply \"$groupId:$artifactId:$version\"")
+            }
+        }
+    }
+
 }

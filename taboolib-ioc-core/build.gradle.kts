@@ -7,9 +7,6 @@ plugins {
 
 taboolib {
     subproject = true
-    env {
-        install(Basic)
-    }
 }
 
 dependencies {

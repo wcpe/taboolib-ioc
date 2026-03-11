@@ -5,39 +5,11 @@ plugins {
     `maven-publish`
 }
 
-// 聚合模块不需要打包 Taboolib 运行时
 taboolib {
-    subproject = false
+    subproject = true
 }
 
 dependencies {
     api(project(":taboolib-ioc-api"))
     api(project(":taboolib-ioc-core"))
-}
-
-publishing {
-    repositories {
-        maven {
-            credentials {
-                username = project.findProperty("username")?.toString() ?: ""
-                password = project.findProperty("password")?.toString() ?: ""
-            }
-            authentication {
-                create<BasicAuthentication>("basic")
-            }
-            val releasesRepoUrl = uri("https://maven.wcpe.top/repository/maven-releases/")
-            val snapshotsRepoUrl = uri("https://maven.wcpe.top/repository/maven-snapshots/")
-            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
-        }
-        mavenLocal()
-    }
-    publications {
-        create<MavenPublication>("maven") {
-            groupId = "top.wcpe.taboolib.ioc"
-            artifactId = "taboolib-ioc"
-            version = "${project.version}"
-            from(components["java"])
-            println("> Apply \"$groupId:$artifactId:$version\"")
-        }
-    }
 }
