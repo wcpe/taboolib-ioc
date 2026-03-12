@@ -10,7 +10,7 @@ import kotlin.reflect.KClass
  * @param value 需要存在的 Bean 类型
  * @param name 需要存在的 Bean 名称
  */
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnBean(
     vararg val value: KClass<*> = [],

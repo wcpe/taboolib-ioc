@@ -10,7 +10,7 @@ import kotlin.reflect.KClass
  * @param value 不应存在的 Bean 类型
  * @param name 不应存在的 Bean 名称
  */
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnMissingBean(
     vararg val value: KClass<*> = [],

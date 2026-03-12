@@ -5,6 +5,6 @@ package top.wcpe.taboolib.ioc.annotation
  *
  * @param value 类全限定名数组
  */
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnMissingClass(vararg val value: String)

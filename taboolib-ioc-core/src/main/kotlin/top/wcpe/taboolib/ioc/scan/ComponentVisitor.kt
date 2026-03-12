@@ -93,6 +93,16 @@ object ComponentVisitor : ClassVisitor(1) {
                 val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
                 for (beanDef in beanDefinitions) {
                     if (BeanContainer.getRegistry().contains(beanDef.name)) continue
+                    // 评估 @Bean 方法上的条件注解
+                    val beanMethod = beanDef.factoryMethod ?: continue
+                    if (ConditionEvaluator.shouldSkipOnScan(beanMethod, conditionContext)) {
+                        debug("[IoC] @Bean 方法条件不满足，跳过: ${beanDef.name}")
+                        continue
+                    }
+                    if (ConditionEvaluator.hasBeanCondition(beanMethod)) {
+                        deferredBeanConditions.add(javaClass to beanDef)
+                        continue
+                    }
                     BeanContainer.getRegistry().register(beanDef)
                     scanned++
                     debug("[IoC] 扫描到 @Bean: ${beanDef.name} (${beanDef.type.simpleName}) <- ${definition.name}")
@@ -123,6 +133,16 @@ object ComponentVisitor : ClassVisitor(1) {
                     val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
                     for (beanDef in beanDefinitions) {
                         if (BeanContainer.getRegistry().contains(beanDef.name)) continue
+                        // 评估 @Bean 方法上的条件注解
+                        val beanMethod = beanDef.factoryMethod
+                        if (beanMethod != null && ConditionEvaluator.shouldSkipOnScan(beanMethod, conditionContext)) {
+                            debug("[IoC] @Bean 方法条件不满足，跳过（条件装配）: ${beanDef.name}")
+                            continue
+                        }
+                        if (beanMethod != null && ConditionEvaluator.shouldSkipOnBeanCondition(beanMethod, conditionContext)) {
+                            debug("[IoC] @Bean 方法 Bean 条件不满足，跳过（条件装配）: ${beanDef.name}")
+                            continue
+                        }
                         BeanContainer.getRegistry().register(beanDef)
                         scanned++
                         debug("[IoC] 扫描到 @Bean（条件装配）: ${beanDef.name} (${beanDef.type.simpleName}) <- ${definition.name}")

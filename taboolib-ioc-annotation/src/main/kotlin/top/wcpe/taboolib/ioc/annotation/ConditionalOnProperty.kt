@@ -7,7 +7,7 @@ package top.wcpe.taboolib.ioc.annotation
  * @param havingValue 期望的属性值，为空字符串时仅检查属性是否存在
  * @param matchIfMissing 属性不存在时是否视为匹配，默认 false
  */
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnProperty(
     val name: String,

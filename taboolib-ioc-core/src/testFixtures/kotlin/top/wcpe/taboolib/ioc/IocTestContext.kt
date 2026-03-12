@@ -61,11 +61,19 @@ class IocTestContext {
 
         // 如果是 @Configuration 类，扫描其 @Bean 方法
         if (clazz.isAnnotationPresent(Configuration::class.java)) {
+            val conditionContext = createConditionContext()
             val beanDefinitions = ConfigurationScanner.scan(clazz, definition.name)
             for (beanDef in beanDefinitions) {
-                if (!registry.contains(beanDef.name)) {
-                    registry.register(beanDef)
+                if (registry.contains(beanDef.name)) continue
+                // 评估 @Bean 方法上的条件注解
+                val beanMethod = beanDef.factoryMethod
+                if (beanMethod != null && ConditionEvaluator.shouldSkipOnScan(beanMethod, conditionContext)) {
+                    continue
                 }
+                if (beanMethod != null && ConditionEvaluator.shouldSkipOnBeanCondition(beanMethod, conditionContext)) {
+                    continue
+                }
+                registry.register(beanDef)
             }
         }
     }

@@ -9,6 +9,6 @@ import kotlin.reflect.KClass
  *
  * @param value 条件实现类数组
  */
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Conditional(vararg val value: KClass<out Condition>)
