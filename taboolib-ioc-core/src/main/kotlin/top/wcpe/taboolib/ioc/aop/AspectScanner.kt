@@ -41,6 +41,18 @@ object AspectScanner {
                 val expr = resolveExpression(around.value, pointcutMethods)
                 advisors.add(Advisor(PointcutExpression.parse(expr), method, aspectInstance, AdviceType.AROUND))
             }
+
+            val afterReturning = method.getAnnotation(AfterReturning::class.java)
+            if (afterReturning != null) {
+                val expr = resolveExpression(afterReturning.value, pointcutMethods)
+                advisors.add(Advisor(PointcutExpression.parse(expr), method, aspectInstance, AdviceType.AFTER_RETURNING))
+            }
+
+            val afterThrowing = method.getAnnotation(AfterThrowing::class.java)
+            if (afterThrowing != null) {
+                val expr = resolveExpression(afterThrowing.value, pointcutMethods)
+                advisors.add(Advisor(PointcutExpression.parse(expr), method, aspectInstance, AdviceType.AFTER_THROWING))
+            }
         }
 
         return advisors

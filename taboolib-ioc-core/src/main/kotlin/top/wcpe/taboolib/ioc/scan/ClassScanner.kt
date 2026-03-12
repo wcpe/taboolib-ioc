@@ -73,7 +73,8 @@ class ClassScanner(
             clazz.isAnnotationPresent(Service::class.java) ||
             clazz.isAnnotationPresent(Repository::class.java) ||
             clazz.isAnnotationPresent(Controller::class.java) ||
-            clazz.isAnnotationPresent(Aspect::class.java)
+            clazz.isAnnotationPresent(Aspect::class.java) ||
+            clazz.isAnnotationPresent(Configuration::class.java)
     }
 
     /**
@@ -83,6 +84,7 @@ class ClassScanner(
         return clazz.getAnnotation(Component::class.java) ?: clazz.getAnnotation(Service::class.java)
             ?: clazz.getAnnotation(Repository::class.java)
             ?: clazz.getAnnotation(Controller::class.java)
+            ?: clazz.getAnnotation(Configuration::class.java)
     }
 
     /**
@@ -94,6 +96,7 @@ class ClassScanner(
             is Service -> annotation.value
             is Repository -> annotation.value
             is Controller -> annotation.value
+            is Configuration -> annotation.value
             else -> ""
         }
 

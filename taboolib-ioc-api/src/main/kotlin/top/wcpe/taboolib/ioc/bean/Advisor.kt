@@ -6,7 +6,7 @@ import java.lang.reflect.Method
  * 通知类型。
  */
 enum class AdviceType {
-    BEFORE, AFTER, AROUND
+    BEFORE, AFTER, AROUND, AFTER_RETURNING, AFTER_THROWING
 }
 
 /**

@@ -5,6 +5,7 @@ import taboolib.common.inject.ClassVisitor
 import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
+import top.wcpe.taboolib.ioc.annotation.Configuration
 import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
@@ -86,6 +87,17 @@ object ComponentVisitor : ClassVisitor(1) {
             registerTotalNs += System.nanoTime() - regStart
             scanned++
             debug("[IoC] 扫描到组件: ${definition.name} (${definition.type.simpleName})")
+
+            // 如果是 @Configuration 类，扫描其 @Bean 方法
+            if (javaClass.isAnnotationPresent(Configuration::class.java)) {
+                val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
+                for (beanDef in beanDefinitions) {
+                    if (BeanContainer.getRegistry().contains(beanDef.name)) continue
+                    BeanContainer.getRegistry().register(beanDef)
+                    scanned++
+                    debug("[IoC] 扫描到 @Bean: ${beanDef.name} (${beanDef.type.simpleName}) <- ${definition.name}")
+                }
+            }
         }
 
         // ── 阶段二：评估 @ConditionalOnBean / @ConditionalOnMissingBean ──
@@ -105,6 +117,17 @@ object ComponentVisitor : ClassVisitor(1) {
                 registerTotalNs += System.nanoTime() - regStart
                 scanned++
                 debug("[IoC] 扫描到组件（条件装配）: ${definition.name} (${definition.type.simpleName})")
+
+                // 如果是 @Configuration 类，扫描其 @Bean 方法
+                if (javaClass.isAnnotationPresent(Configuration::class.java)) {
+                    val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
+                    for (beanDef in beanDefinitions) {
+                        if (BeanContainer.getRegistry().contains(beanDef.name)) continue
+                        BeanContainer.getRegistry().register(beanDef)
+                        scanned++
+                        debug("[IoC] 扫描到 @Bean（条件装配）: ${beanDef.name} (${beanDef.type.simpleName}) <- ${definition.name}")
+                    }
+                }
             }
         }
 

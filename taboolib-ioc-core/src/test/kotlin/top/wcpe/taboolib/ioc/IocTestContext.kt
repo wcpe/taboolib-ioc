@@ -1,6 +1,7 @@
 package top.wcpe.taboolib.ioc
 
 import top.wcpe.taboolib.ioc.annotation.ConditionContext
+import top.wcpe.taboolib.ioc.annotation.Configuration
 import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.aop.AspectScanner
@@ -16,6 +17,7 @@ import top.wcpe.taboolib.ioc.inject.FieldInjector
 import top.wcpe.taboolib.ioc.inject.Injector
 import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
 import top.wcpe.taboolib.ioc.scan.ClassScanner
+import top.wcpe.taboolib.ioc.scan.ConfigurationScanner
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -56,6 +58,16 @@ class IocTestContext {
     fun register(clazz: Class<*>) {
         val definition = scanner.scan(clazz) ?: error("扫描失败: ${clazz.name}")
         registry.register(definition)
+
+        // 如果是 @Configuration 类，扫描其 @Bean 方法
+        if (clazz.isAnnotationPresent(Configuration::class.java)) {
+            val beanDefinitions = ConfigurationScanner.scan(clazz, definition.name)
+            for (beanDef in beanDefinitions) {
+                if (!registry.contains(beanDef.name)) {
+                    registry.register(beanDef)
+                }
+            }
+        }
     }
 
     /**

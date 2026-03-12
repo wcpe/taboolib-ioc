@@ -8,7 +8,7 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 
 /**
- * 拦截器链 — 按顺序执行 Before → Around → After 通知。
+ * 拦截器链 — 按顺序执行 Before → Around → After / AfterReturning / AfterThrowing 通知。
  */
 class InterceptorChain(
     private val target: Any,
@@ -20,6 +20,8 @@ class InterceptorChain(
     private val beforeAdvisors = advisors.filter { it.adviceType == AdviceType.BEFORE }
     private val afterAdvisors = advisors.filter { it.adviceType == AdviceType.AFTER }
     private val aroundAdvisors = advisors.filter { it.adviceType == AdviceType.AROUND }
+    private val afterReturningAdvisors = advisors.filter { it.adviceType == AdviceType.AFTER_RETURNING }
+    private val afterThrowingAdvisors = advisors.filter { it.adviceType == AdviceType.AFTER_THROWING }
     private var aroundIndex = 0
 
     /**
@@ -32,7 +34,8 @@ class InterceptorChain(
         }
 
         // 2. 执行 @Around 链（或直接调用目标方法）
-        val result: Any?
+        var result: Any? = null
+        var thrown: Throwable? = null
         try {
             result = if (aroundAdvisors.isNotEmpty()) {
                 aroundIndex = 0
@@ -41,10 +44,24 @@ class InterceptorChain(
             } else {
                 invokeTarget()
             }
+        } catch (e: Throwable) {
+            thrown = e
         } finally {
             // 3. 执行所有 @After 通知（无论是否异常）
             for (advisor in afterAdvisors) {
                 runCatching { invokeAdvice(advisor) }
+            }
+        }
+
+        // 4. 根据结果执行 @AfterReturning 或 @AfterThrowing
+        if (thrown != null) {
+            for (advisor in afterThrowingAdvisors) {
+                runCatching { invokeAfterThrowing(advisor, thrown) }
+            }
+            throw thrown
+        } else {
+            for (advisor in afterReturningAdvisors) {
+                runCatching { invokeAfterReturning(advisor, result) }
             }
         }
 
@@ -74,6 +91,30 @@ class InterceptorChain(
         } else {
             // 尝试传递目标方法参数
             advisor.adviceMethod.invoke(advisor.aspectInstance, *(args ?: emptyArray()))
+        }
+    }
+
+    /**
+     * 调用 @AfterReturning 通知。
+     * 无参 = 不关心返回值；1 个参数 = 接收返回值(Any?)。
+     */
+    private fun invokeAfterReturning(advisor: Advisor, result: Any?) {
+        if (advisor.adviceMethod.parameterCount == 0) {
+            advisor.adviceMethod.invoke(advisor.aspectInstance)
+        } else {
+            advisor.adviceMethod.invoke(advisor.aspectInstance, result)
+        }
+    }
+
+    /**
+     * 调用 @AfterThrowing 通知。
+     * 无参 = 不关心异常；1 个参数 = 接收异常(Throwable)。
+     */
+    private fun invokeAfterThrowing(advisor: Advisor, throwable: Throwable) {
+        if (advisor.adviceMethod.parameterCount == 0) {
+            advisor.adviceMethod.invoke(advisor.aspectInstance)
+        } else {
+            advisor.adviceMethod.invoke(advisor.aspectInstance, throwable)
         }
     }
 }
