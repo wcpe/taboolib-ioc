@@ -3,10 +3,14 @@ package top.wcpe.taboolib.ioc.lifecycle
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
+import top.wcpe.taboolib.ioc.bean.BeanCreatedEvent
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.BeanDestroyedEvent
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
 import top.wcpe.taboolib.ioc.bean.BeanScopes
+import top.wcpe.taboolib.ioc.bean.ContainerInitializedEvent
+import top.wcpe.taboolib.ioc.bean.ContainerShutdownEvent
 import top.wcpe.taboolib.ioc.bean.InjectParameter
 import top.wcpe.taboolib.ioc.cycle.CircularDependencyException
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
@@ -27,7 +31,8 @@ class LifecycleManager(
     private val injector: Injector,
     private val cycleDetector: CycleDetector,
     private val scopeLookup: (String) -> BeanScope? = { null },
-    private val aopProxyFactory: AopProxyFactory? = null
+    private val aopProxyFactory: AopProxyFactory? = null,
+    val eventBus: EventBus = EventBus()
 ) {
 
     private val initializationOrder = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -71,6 +76,8 @@ class LifecycleManager(
         }
         val eagerMs = (System.nanoTime() - eagerStart) / 1_000_000.0
         debug("[IoC] 预初始化完成，共 ${orderedDefs.size} 个 Bean，耗时 ${"%.2f".format(eagerMs)}ms")
+
+        eventBus.publish(ContainerInitializedEvent(definitions.size))
     }
 
     fun getOrCreateSingleton(definition: BeanDefinition): Any {
@@ -130,12 +137,15 @@ class LifecycleManager(
 
         for (name in initializationOrder.reversed()) {
             val definition = registry.getByName(name) ?: continue
-            val preDestroy = definition.preDestroy ?: continue
+            val preDestroy = definition.preDestroy
             try {
-                val destroyStart = System.nanoTime()
-                preDestroy.invoke(cycleResolver.getSingleton(name))
-                val destroyMs = (System.nanoTime() - destroyStart) / 1_000_000.0
-                debug("[IoC] Bean 销毁完成: $name，耗时 ${"%.2f".format(destroyMs)}ms")
+                if (preDestroy != null) {
+                    val destroyStart = System.nanoTime()
+                    preDestroy.invoke(cycleResolver.getSingleton(name))
+                    val destroyMs = (System.nanoTime() - destroyStart) / 1_000_000.0
+                    debug("[IoC] Bean 销毁完成: $name，耗时 ${"%.2f".format(destroyMs)}ms")
+                }
+                eventBus.publish(BeanDestroyedEvent(name, definition))
             } catch (e: Exception) {
                 warning("[IoC] Bean 销毁失败: $name - ${e.message}")
             }
@@ -144,6 +154,7 @@ class LifecycleManager(
         resetState()
         val totalMs = (System.nanoTime() - start) / 1_000_000.0
         debug("[IoC] 容器关闭完成，总耗时 ${"%.2f".format(totalMs)}ms")
+        eventBus.publish(ContainerShutdownEvent())
     }
 
     private fun createBean(definition: BeanDefinition, cacheSingleton: Boolean): Any {
@@ -209,6 +220,7 @@ class LifecycleManager(
             if (cacheSingleton && initializedSingletons.add(definition.name)) {
                 initializationOrder.add(definition.name)
             }
+            eventBus.publish(BeanCreatedEvent(definition.name, finalInstance, definition))
             return finalInstance
         } finally {
             stack.removeLast()

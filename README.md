@@ -10,6 +10,7 @@
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
 - 依赖注入：构造函数、字段、方法注入
+- 属性注入：`@Value("${property:default}")` 从系统属性注入值
 - 容器初始化：非 lazy singleton 在 `ENABLE` 阶段预初始化，其他作用域按需创建
 - 名称限定：`@Named`、`@Resource`、`@Primary`
 - 生命周期：`@PostConstruct`、`@PostEnable`、`@PreDestroy`
@@ -17,6 +18,7 @@
 - 扫描控制：`@ComponentScan`
 - 懒加载：`@Lazy`（类级别延迟初始化 + 字段/参数级别代理懒加载）
 - 排序控制：`@Order` 控制 `getBeansOfType` 返回顺序和 AOP Advisor 执行顺序
+- 事件机制：`EventBus` 监听 Bean 创建/销毁和容器生命周期事件
 - 循环依赖检测：singleton Bean 的字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
 - Kotlin `object` 自动注入
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`

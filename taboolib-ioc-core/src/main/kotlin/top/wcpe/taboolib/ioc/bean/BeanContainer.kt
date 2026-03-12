@@ -11,6 +11,7 @@ import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
 import top.wcpe.taboolib.ioc.inject.FieldInjector
 import top.wcpe.taboolib.ioc.inject.Injector
+import top.wcpe.taboolib.ioc.lifecycle.EventBus
 import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
 import top.wcpe.taboolib.ioc.scan.ClassScanner
 import top.wcpe.taboolib.ioc.scope.RefreshBeanScope
@@ -64,39 +65,33 @@ object BeanContainer {
     @Volatile
     private var initializing = false
 
+    private val resolver by lazy {
+        BeanResolver(
+            registry = registry,
+            manualBeans = manualBeansByName,
+            singletonProvider = lifecycleManager::getOrCreateSingleton,
+            transientProvider = lifecycleManager::createTransient,
+            scopeLookup = ::getScope
+        )
+    }
+
     @Suppress("UNCHECKED_CAST")
     fun <T> getBean(type: Class<T>, name: String? = null): T? {
         if (!initialized && !initializing) {
             warning("[IoC] 容器未初始化")
             return null
         }
-
-        if (name != null) {
-            manualBeansByName[name]?.takeIf { type.isInstance(it) }?.let {
-                return it as T
-            }
-        }
-
-        return (resolveBean(type, name) ?: resolveManualBean(type)) as? T
+        return resolver.getBean(type, name)
     }
 
-    @Suppress("UNCHECKED_CAST")
     fun <T> getBeansOfType(type: Class<T>): List<T> {
         if (!initialized) return emptyList()
-
-        val registeredBeans = registry.getByType(type).mapNotNull { def ->
-            getBean(type, def.name)
-        }
-        val manualBeans = manualBeansByName.values
-            .filter { type.isInstance(it) }
-            .map { type.cast(it) }
-
-        return (registeredBeans + manualBeans).distinctBy { System.identityHashCode(it) }
+        return resolver.getBeansOfType(type)
     }
 
-    fun containsBean(name: String): Boolean = manualBeansByName.containsKey(name) || registry.contains(name)
+    fun containsBean(name: String): Boolean = resolver.containsBean(name)
 
-    fun getBeanNames(): Set<String> = registry.getNames() + manualBeansByName.keys
+    fun getBeanNames(): Set<String> = resolver.getBeanNames()
 
     fun registerBean(name: String, instance: Any) {
         manualBeansByName[name] = instance
@@ -128,6 +123,11 @@ object BeanContainer {
     fun getThreadScope(): ThreadBeanScope? {
         return customScopes[BeanScopes.THREAD] as? ThreadBeanScope
     }
+
+    /**
+     * 获取容器事件总线，用于监听 Bean 生命周期事件。
+     */
+    fun getEventBus(): EventBus = lifecycleManager.eventBus
 
 
     /**
@@ -193,6 +193,7 @@ object BeanContainer {
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
+        lifecycleManager.eventBus.clear()
         initialized = false
 
         val ms = (System.nanoTime() - start) / 1_000_000.0
@@ -225,37 +226,6 @@ object BeanContainer {
         manualBeansByName.clear()
         initialized = false
         initializing = false
-    }
-
-    private fun resolveBean(type: Class<*>, name: String?): Any? {
-        val definition = if (name != null) {
-            registry.getByName(name)
-        } else {
-            registry.getPrimaryByType(type)
-        } ?: return null
-
-        if (!type.isAssignableFrom(definition.type)) {
-            return null
-        }
-
-        return when {
-            definition.isSingletonScope() -> lifecycleManager.getOrCreateSingleton(definition)
-            definition.isPrototypeScope() -> lifecycleManager.createTransient(definition)
-            else -> resolveCustomScopedBean(definition)
-        }
-    }
-
-    private fun resolveCustomScopedBean(definition: BeanDefinition): Any {
-        val scope = getScope(definition.scope)
-            ?: throw IllegalStateException("未注册的 Bean 作用域: ${definition.scope} (${definition.name})")
-
-        return scope.get(definition.name, definition) {
-            lifecycleManager.createTransient(definition)
-        }
-    }
-
-    private fun resolveManualBean(type: Class<*>): Any? {
-        return manualBeansByName.values.firstOrNull { type.isInstance(it) }
     }
 
     private fun registerBuiltinScopes() {

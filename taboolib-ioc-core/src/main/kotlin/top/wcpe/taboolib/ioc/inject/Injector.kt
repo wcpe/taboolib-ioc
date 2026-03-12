@@ -35,6 +35,7 @@ class Injector(
     fun populate(instance: Any, definition: BeanDefinition) {
         fieldInjector.injectFields(instance, definition)
         fieldInjector.injectMethods(instance, definition)
+        fieldInjector.injectValues(instance, definition)
     }
 
     /**

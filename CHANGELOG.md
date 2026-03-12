@@ -15,7 +15,13 @@
 - Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`，提供更简洁的 Bean 获取方式
 - `@Primary` 注解：同类型多 Bean 时标记首选，`getBean` 按类型解析时优先返回
 - `@Order` 注解：控制 `getBeansOfType` 返回顺序和 AOP Advisor 执行顺序，值越小优先级越高
+- `@Value` 属性注入：支持 `${property:default}` 表达式从系统属性注入值，支持 String/Int/Long/Double/Float/Boolean 类型
+- Bean 事件机制：`EventBus` + `BeanCreatedEvent`/`BeanDestroyedEvent`/`ContainerInitializedEvent`/`ContainerShutdownEvent`
 - 注入失败时输出 warning 日志，包含类名、字段名、类型和名称限定信息
+
+### 重构
+
+- 提取 `BeanResolver` 类，消除 `BeanContainer` 和 `IocTestContext` 之间的 Bean 解析重复代码
 
 ### 修复
 

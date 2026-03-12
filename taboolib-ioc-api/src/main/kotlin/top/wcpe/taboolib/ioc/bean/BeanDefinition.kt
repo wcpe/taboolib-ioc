@@ -20,6 +20,7 @@ import java.lang.reflect.Method
  * @property scope Bean 作用域
  * @property isPrimary 是否为首选 Bean
  * @property order 排序优先级，值越小优先级越高
+ * @property valueFields 需要属性值注入的字段列表
  */
 class BeanDefinition(
     val name: String,
@@ -36,7 +37,8 @@ class BeanDefinition(
     val scope: String = BeanScopes.SINGLETON,
     val isAspect: Boolean = false,
     val isPrimary: Boolean = false,
-    val order: Int = Int.MAX_VALUE
+    val order: Int = Int.MAX_VALUE,
+    val valueFields: List<ValueField> = emptyList()
 ) {
     init {
         constructor.isAccessible = true

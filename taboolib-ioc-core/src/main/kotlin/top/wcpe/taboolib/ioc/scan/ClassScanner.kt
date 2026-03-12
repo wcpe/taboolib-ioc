@@ -43,6 +43,7 @@ class ClassScanner(
         val scope = resolveScope(clazz)
         val isPrimary = clazz.isAnnotationPresent(Primary::class.java)
         val order = clazz.getAnnotation(Order::class.java)?.value ?: Int.MAX_VALUE
+        val valueFields = resolveValueFields(clazz)
 
         return BeanDefinition(
             name = name,
@@ -59,7 +60,8 @@ class ClassScanner(
             scope = scope,
             isAspect = isAspect,
             isPrimary = isPrimary,
-            order = order
+            order = order,
+            valueFields = valueFields
         )
     }
 
@@ -208,6 +210,18 @@ class ClassScanner(
      */
     private fun findPreDestroy(clazz: Class<*>): java.lang.reflect.Method? {
         return clazz.declaredMethods.firstOrNull { it.isAnnotationPresent(PreDestroy::class.java) }
+    }
+
+    /**
+     * 解析 @Value 字段
+     */
+    private fun resolveValueFields(clazz: Class<*>): List<ValueField> {
+        return clazz.declaredFields.mapNotNull { field ->
+            val value = field.getAnnotation(Value::class.java)
+                ?: field.findAnnotation(Value::class.java)
+                ?: return@mapNotNull null
+            ValueField(field, value.value)
+        }
     }
 }
 

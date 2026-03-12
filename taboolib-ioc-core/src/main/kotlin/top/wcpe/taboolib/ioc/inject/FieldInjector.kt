@@ -101,6 +101,23 @@ class FieldInjector(
     }
 
     /**
+     * 注入 @Value 属性值
+     */
+    fun injectValues(instance: Any, definition: BeanDefinition) {
+        for (valueField in definition.valueFields) {
+            val value = ValueResolver.resolve(valueField.expression, valueField.field.type)
+            if (value != null) {
+                valueField.field.set(instance, value)
+            } else {
+                warning(
+                    "[IoC] @Value 注入失败: ${instance.javaClass.simpleName}.${valueField.field.name}" +
+                        " (表达式=${valueField.expression})"
+                )
+            }
+        }
+    }
+
+    /**
      * 解析依赖值
      */
     internal fun resolveDependency(type: Class<*>, nameQualifier: String?): Any? {

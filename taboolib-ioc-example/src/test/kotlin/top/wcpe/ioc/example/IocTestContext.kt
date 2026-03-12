@@ -5,6 +5,7 @@ import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.aop.AspectScanner
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.BeanResolver
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
 import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
@@ -22,14 +23,6 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * 不依赖 TabooLib 运行时和 BeanContainer 单例，
  * 可在纯 JUnit 环境中独立运行，方便编写单元测试。
- *
- * 用法：
- * ```kotlin
- * val ctx = IocTestContext()
- * ctx.register(MyService::class.java)
- * ctx.initialize()
- * val bean = ctx.getBean(MyService::class.java)
- * ```
  */
 class IocTestContext {
 
@@ -37,9 +30,10 @@ class IocTestContext {
     private val cycleResolver = CycleResolver()
     private val cycleDetector = CycleDetector()
     private val constructorResolver = ConstructorResolver()
-    private val fieldInjector = FieldInjector(registry, ::resolveBean)
-    private val injector = Injector(fieldInjector, ::resolveBean)
+    private val manualBeans = ConcurrentHashMap<String, Any>()
     private val customScopes = ConcurrentHashMap<String, BeanScope>()
+    private val fieldInjector = FieldInjector(registry) { type, name -> beanLookup(type, name) }
+    private val injector = Injector(fieldInjector) { type, name -> beanLookup(type, name) }
     val advisorRegistry = AdvisorRegistry()
     private val aopProxyFactory = AopProxyFactory(advisorRegistry)
     val lifecycleManager = LifecycleManager(
@@ -48,7 +42,15 @@ class IocTestContext {
         aopProxyFactory
     )
     private val scanner = ClassScanner(constructorResolver)
-    private val manualBeans = ConcurrentHashMap<String, Any>()
+    private val resolver = BeanResolver(
+        registry = registry,
+        manualBeans = manualBeans,
+        singletonProvider = lifecycleManager::getOrCreateSingleton,
+        transientProvider = lifecycleManager::createTransient,
+        scopeLookup = { name -> customScopes[name] }
+    )
+
+    private fun beanLookup(type: Class<*>, name: String?): Any? = resolver.getBean(type, name)
 
     /** 扫描并注册一个组件类 */
     fun register(clazz: Class<*>) {
@@ -112,61 +114,17 @@ class IocTestContext {
     }
 
     /** 按类型获取 Bean */
-    @Suppress("UNCHECKED_CAST")
-    fun <T> getBean(type: Class<T>, name: String? = null): T? {
-        if (name != null) {
-            manualBeans[name]?.takeIf { type.isInstance(it) }?.let { return it as T }
-        }
-        return resolveBean(type, name) as? T
-    }
+    fun <T> getBean(type: Class<T>, name: String? = null): T? = resolver.getBean(type, name)
 
     /** 获取某类型的所有 Bean */
-    @Suppress("UNCHECKED_CAST")
-    fun <T> getBeansOfType(type: Class<T>): List<T> {
-        val registeredBeans = registry.getByType(type).mapNotNull { def ->
-            getBean(type, def.name)
-        }
-        val manual = manualBeans.values.filter { type.isInstance(it) }.map { type.cast(it) }
-        return (registeredBeans + manual).distinctBy { System.identityHashCode(it) }
-    }
+    fun <T> getBeansOfType(type: Class<T>): List<T> = resolver.getBeansOfType(type)
 
     /** 检查 Bean 是否存在 */
-    fun containsBean(name: String): Boolean = manualBeans.containsKey(name) || registry.contains(name)
+    fun containsBean(name: String): Boolean = resolver.containsBean(name)
 
     /** 获取所有 Bean 名称 */
-    fun getBeanNames(): Set<String> = registry.getNames() + manualBeans.keys
+    fun getBeanNames(): Set<String> = resolver.getBeanNames()
 
     /** 获取已创建的 singleton 实例 */
     fun getSingleton(name: String): Any? = cycleResolver.getSingleton(name)
-
-    private fun resolveBean(type: Class<*>, name: String?): Any? {
-        // 先查手动注册
-        if (name != null) {
-            manualBeans[name]?.takeIf { type.isInstance(it) }?.let { return it }
-        }
-        // 再查已创建的 singleton
-        if (name != null) {
-            cycleResolver.getSingleton(name)?.takeIf { type.isInstance(it) }?.let { return it }
-        }
-        // 查 registry
-        val definition = if (name != null) {
-            registry.getByName(name)
-        } else {
-            registry.getPrimaryByType(type)
-        } ?: return null
-
-        if (!type.isAssignableFrom(definition.type)) return null
-
-        return when {
-            definition.isSingletonScope() -> lifecycleManager.getOrCreateSingleton(definition)
-            definition.isPrototypeScope() -> lifecycleManager.createTransient(definition)
-            else -> {
-                val scope = customScopes[definition.scope]
-                    ?: throw IllegalStateException("未注册的作用域: ${definition.scope}")
-                scope.get(definition.name, definition) {
-                    lifecycleManager.createTransient(definition)
-                }
-            }
-        }
-    }
 }
