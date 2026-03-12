@@ -10,12 +10,13 @@
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
 - 依赖注入：构造函数、字段、方法注入
-- 容器初始化：非 lazy singleton 在 `ACTIVE` 阶段预初始化，其他作用域按需创建
-- 名称限定：`@Named`、`@Resource`
+- 容器初始化：非 lazy singleton 在 `ENABLE` 阶段预初始化，其他作用域按需创建
+- 名称限定：`@Named`、`@Resource`、`@Primary`
 - 生命周期：`@PostConstruct`、`@PostEnable`、`@PreDestroy`
 - 作用域：默认 singleton、`@Prototype`、`@Scope`、`@ThreadScope`、`@RefreshScope` 与 `registerScope` 自定义作用域
 - 扫描控制：`@ComponentScan`
-- 懒加载：`@Lazy`
+- 懒加载：`@Lazy`（类级别延迟初始化 + 字段/参数级别代理懒加载）
+- 排序控制：`@Order` 控制 `getBeansOfType` 返回顺序和 AOP Advisor 执行顺序
 - 循环依赖检测：singleton Bean 的字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
 - Kotlin `object` 自动注入
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
@@ -55,7 +56,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0-SNAPSHOT")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突

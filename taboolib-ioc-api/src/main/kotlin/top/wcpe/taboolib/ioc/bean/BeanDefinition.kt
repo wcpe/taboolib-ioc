@@ -18,6 +18,8 @@ import java.lang.reflect.Method
  * @property preDestroy 销毁前回调方法
  * @property lazyInit 是否延迟初始化
  * @property scope Bean 作用域
+ * @property isPrimary 是否为首选 Bean
+ * @property order 排序优先级，值越小优先级越高
  */
 class BeanDefinition(
     val name: String,
@@ -32,7 +34,9 @@ class BeanDefinition(
     val dependencies: List<InjectParameter>,
     val lazyInit: Boolean = false,
     val scope: String = BeanScopes.SINGLETON,
-    val isAspect: Boolean = false
+    val isAspect: Boolean = false,
+    val isPrimary: Boolean = false,
+    val order: Int = Int.MAX_VALUE
 ) {
     init {
         constructor.isAccessible = true

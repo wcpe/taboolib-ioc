@@ -30,8 +30,8 @@ class LifecycleManager(
     private val aopProxyFactory: AopProxyFactory? = null
 ) {
 
-    private val initializationOrder = mutableListOf<String>()
-    private val initializedSingletons = mutableSetOf<String>()
+    private val initializationOrder = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val initializedSingletons = ConcurrentHashMap.newKeySet<String>()
     private val singletonLocks = ConcurrentHashMap<String, Any>()
     private val creationStack = ThreadLocal.withInitial { ArrayDeque<String>() }
 

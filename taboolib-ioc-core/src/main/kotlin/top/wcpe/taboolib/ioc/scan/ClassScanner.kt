@@ -41,6 +41,8 @@ class ClassScanner(
         val preDestroy = findPreDestroy(clazz)
         val lazyInit = resolveLazyInit(clazz)
         val scope = resolveScope(clazz)
+        val isPrimary = clazz.isAnnotationPresent(Primary::class.java)
+        val order = clazz.getAnnotation(Order::class.java)?.value ?: Int.MAX_VALUE
 
         return BeanDefinition(
             name = name,
@@ -55,7 +57,9 @@ class ClassScanner(
             preDestroy = preDestroy,
             lazyInit = lazyInit,
             scope = scope,
-            isAspect = isAspect
+            isAspect = isAspect,
+            isPrimary = isPrimary,
+            order = order
         )
     }
 

@@ -29,6 +29,13 @@ class FieldInjector(
                 if (value != null) {
                     injectField.field.isAccessible = true
                     injectField.field.set(instance, value)
+                } else {
+                    warning(
+                        "[IoC] 字段注入失败: ${instance.javaClass.simpleName}.${injectField.field.name}" +
+                            " (类型=${injectField.requiredType.simpleName}" +
+                            "${if (injectField.nameQualifier != null) ", 名称=${injectField.nameQualifier}" else ""})" +
+                            " — 未找到匹配的 Bean"
+                    )
                 }
             }
         }
@@ -75,8 +82,17 @@ class FieldInjector(
      */
     fun injectMethods(instance: Any, definition: BeanDefinition) {
         for (injectMethod in definition.injectMethods) {
-            val args = injectMethod.parameters.map { param ->
-                resolveDependency(param.type, param.nameQualifier)
+            val args = injectMethod.parameters.mapIndexed { index, param ->
+                val value = resolveDependency(param.type, param.nameQualifier)
+                if (value == null) {
+                    warning(
+                        "[IoC] 方法注入参数解析失败: ${instance.javaClass.simpleName}.${injectMethod.method.name}" +
+                            " 参数[$index] (类型=${param.type.simpleName}" +
+                            "${if (param.nameQualifier != null) ", 名称=${param.nameQualifier}" else ""})" +
+                            " — 未找到匹配的 Bean"
+                    )
+                }
+                value
             }.toTypedArray()
 
             injectMethod.method.isAccessible = true

@@ -13,7 +13,15 @@
   - 执行时序：`@PostConstruct`（Bean 创建时）→ object 注入 → `@PostEnable`（ENABLE -80）→ 用户 `@Awake(LifeCycle.ENABLE)`
   - 适用于需要在所有 Bean 就绪后才能执行的初始化逻辑
 - Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`，提供更简洁的 Bean 获取方式
-- 9 个新增单元测试覆盖 `@PostEnable`（5）和扩展方法（4）
+- `@Primary` 注解：同类型多 Bean 时标记首选，`getBean` 按类型解析时优先返回
+- `@Order` 注解：控制 `getBeansOfType` 返回顺序和 AOP Advisor 执行顺序，值越小优先级越高
+- 注入失败时输出 warning 日志，包含类名、字段名、类型和名称限定信息
+
+### 修复
+
+- `BeanRegistry.definitionsByType` 线程安全：内部列表改为 `CopyOnWriteArrayList`
+- `LifecycleManager` 集合线程安全：`initializationOrder` 改为 `synchronizedList`，`initializedSingletons` 改为 `ConcurrentHashMap.newKeySet`
+- 文档修正：README 中 `ACTIVE` 改为 `ENABLE`、安装示例版本号统一、api.md `@Lazy` 描述更新为支持字段级代理懒加载
 
 ## [1.0.0-SNAPSHOT] - 2026-03-11
 

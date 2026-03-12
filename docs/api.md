@@ -14,7 +14,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.0.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0-SNAPSHOT")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突
@@ -82,9 +82,9 @@ annotation class Lazy(val value: Boolean = true)
 
 说明：
 
-- 仅作用于 Bean 自身的创建时机
-- singleton Bean 会在首次解析时初始化，而不是在容器启动时预初始化
-- 不提供注入点级别的代理懒加载
+- 类级别：延迟 Bean 自身的创建时机，singleton Bean 会在首次解析时初始化，而不是在容器启动时预初始化
+- 字段/参数级别：对接口类型的字段或构造函数参数使用 `@Lazy`，会创建 JDK 动态代理，首次调用方法时才解析真实 Bean
+- 字段级别的 `@Lazy` 仅支持接口类型，非接口类型会回退到立即注入并输出警告
 
 ### `@Scope`
 
@@ -101,6 +101,74 @@ annotation class Scope(val value: String = "singleton")
 - 默认作用域是 `singleton`
 - 内置支持 `singleton` 与 `prototype`
 - 其他名称会被当作自定义作用域，通过 `BeanContainer.registerScope(...)` 解析
+
+### `@Primary`
+
+标记首选 Bean。当同一类型存在多个 Bean 时，`getBean` 按类型解析优先返回标记了 `@Primary` 的。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Primary
+```
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Component
+import top.wcpe.yourplugin.ioc.annotation.Primary
+
+interface Cache {
+    fun type(): String
+}
+
+@Component
+@Primary
+class RedisCache : Cache {
+    override fun type() = "redis"
+}
+
+@Component
+class LocalCache : Cache {
+    override fun type() = "local"
+}
+
+// getBean(Cache::class.java) 返回 RedisCache
+```
+
+### `@Order`
+
+控制 Bean 的排序优先级。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Order(val value: Int = Int.MAX_VALUE)
+```
+
+说明：
+
+- 值越小优先级越高，默认为 `Int.MAX_VALUE`
+- 影响 `getBeansOfType` 返回顺序
+- 影响 AOP Advisor 执行顺序
+- 无 `@Primary` 时，`getPrimaryByType` 返回 order 值最小的
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Component
+import top.wcpe.yourplugin.ioc.annotation.Order
+
+@Component
+@Order(1)
+class HighPriorityHandler : Handler
+
+@Component
+@Order(100)
+class LowPriorityHandler : Handler
+
+// getBeansOfType(Handler::class.java) 返回 [HighPriority, LowPriority]
+```
 
 ### `@Prototype`
 

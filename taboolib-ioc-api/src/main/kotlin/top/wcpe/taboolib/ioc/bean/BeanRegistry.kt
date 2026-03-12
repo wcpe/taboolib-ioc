@@ -1,6 +1,7 @@
 package top.wcpe.taboolib.ioc.bean
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Bean 注册表 - 管理 Bean 定义的注册与查询。
@@ -11,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 class BeanRegistry {
 
     private val definitionsByName = ConcurrentHashMap<String, BeanDefinition>()
-    private val definitionsByType = ConcurrentHashMap<Class<*>, MutableList<BeanDefinition>>()
+    private val definitionsByType = ConcurrentHashMap<Class<*>, CopyOnWriteArrayList<BeanDefinition>>()
 
     /**
      * 注册 Bean 定义。
@@ -21,7 +22,7 @@ class BeanRegistry {
     fun register(definition: BeanDefinition) {
         definitionsByName[definition.name] = definition
         resolveAssignableTypes(definition.type).forEach { type ->
-            definitionsByType.getOrPut(type) { mutableListOf() }.add(definition)
+            definitionsByType.getOrPut(type) { CopyOnWriteArrayList() }.add(definition)
         }
     }
 
@@ -34,20 +35,21 @@ class BeanRegistry {
     fun getByName(name: String): BeanDefinition? = definitionsByName[name]
 
     /**
-     * 按类型获取 Bean 定义列表。
+     * 按类型获取 Bean 定义列表，按 order 升序排列。
      *
      * @param type Bean 类型
      * @return Bean 定义列表，可能为空
      */
     fun getByType(type: Class<*>): List<BeanDefinition> =
-        definitionsByType[type]?.toList() ?: emptyList()
+        (definitionsByType[type]?.toList() ?: emptyList()).sortedBy { it.order }
 
     /**
      * 按类型获取首选 Bean 定义。
      *
      * 选择规则：
      * 1. 如果只有一个 Bean，返回它
-     * 2. 如果有多个 Bean，返回最先注册的那个
+     * 2. 如果有多个 Bean，优先返回标记了 @Primary 的
+     * 3. 如果没有 @Primary，返回 order 值最小的
      *
      * @param type Bean 类型
      * @return 首选 Bean 定义，不存在则返回 null
@@ -57,7 +59,7 @@ class BeanRegistry {
         return when {
             definitions.isEmpty() -> null
             definitions.size == 1 -> definitions[0]
-            else -> definitions[0]
+            else -> definitions.firstOrNull { it.isPrimary } ?: definitions[0]
         }
     }
 
