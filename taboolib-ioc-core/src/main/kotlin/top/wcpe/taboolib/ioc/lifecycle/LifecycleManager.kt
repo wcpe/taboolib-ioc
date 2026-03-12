@@ -6,6 +6,7 @@ import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.bean.BeanCreatedEvent
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanDestroyedEvent
+import top.wcpe.taboolib.ioc.bean.BeanPostProcessor
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
 import top.wcpe.taboolib.ioc.bean.BeanScopes
@@ -39,6 +40,11 @@ class LifecycleManager(
     private val initializedSingletons = ConcurrentHashMap.newKeySet<String>()
     private val singletonLocks = ConcurrentHashMap<String, Any>()
     private val creationStack = ThreadLocal.withInitial { ArrayDeque<String>() }
+    private val beanPostProcessors = mutableListOf<BeanPostProcessor>()
+
+    fun addBeanPostProcessor(processor: BeanPostProcessor) {
+        beanPostProcessors.add(processor)
+    }
 
     /**
      * 初始化容器
@@ -59,7 +65,8 @@ class LifecycleManager(
         // 优先初始化切面 Bean，确保 AOP 代理在普通 Bean 创建前就绑定
         val eagerDefinitions = definitions.filter(BeanDefinition::isEagerSingleton)
         val (aspectDefs, normalDefs) = eagerDefinitions.partition { it.isAspect }
-        val orderedDefs = aspectDefs + normalDefs
+        val sortedNormalDefs = topologicalSort(normalDefs)
+        val orderedDefs = aspectDefs + sortedNormalDefs
         debug("[IoC] 开始预初始化 ${orderedDefs.size} 个 eager singleton Bean（其中 ${aspectDefs.size} 个切面）")
 
         val eagerStart = System.nanoTime()
@@ -129,6 +136,7 @@ class LifecycleManager(
         initializedSingletons.clear()
         singletonLocks.clear()
         creationStack.remove()
+        beanPostProcessors.clear()
     }
 
     /**
@@ -186,14 +194,30 @@ class LifecycleManager(
                 injector.populate(instance, definition)
                 val populateMs = (System.nanoTime() - populateStart) / 1_000_000.0
 
+                // BeanPostProcessor — before initialization
+                var processedInstance = instance
+                for (processor in beanPostProcessors) {
+                    processedInstance = processor.postProcessBeforeInitialization(processedInstance, definition.name)
+                }
+
                 val postConstructStart = System.nanoTime()
-                injector.invokePostConstruct(instance, definition)
+                injector.invokePostConstruct(processedInstance, definition)
                 val postConstructMs = (System.nanoTime() - postConstructStart) / 1_000_000.0
+
+                // BeanPostProcessor — after initialization
+                for (processor in beanPostProcessors) {
+                    processedInstance = processor.postProcessAfterInitialization(processedInstance, definition.name)
+                }
+
+                // 如果 processedInstance 被替换了，更新 cycleResolver 中的缓存
+                if (cacheSingleton && processedInstance !== instance) {
+                    cycleResolver.addSingleton(definition.name, processedInstance)
+                }
 
                 // AOP 代理包装（切面 Bean 自身不被代理）
                 finalInstance = if (!definition.isAspect && aopProxyFactory != null) {
-                    val proxy = aopProxyFactory.wrapIfNecessary(instance, definition.type)
-                    if (proxy !== instance) {
+                    val proxy = aopProxyFactory.wrapIfNecessary(processedInstance, definition.type)
+                    if (proxy !== processedInstance) {
                         if (cacheSingleton) {
                             cycleResolver.addSingleton(definition.name, proxy)
                         }
@@ -201,7 +225,7 @@ class LifecycleManager(
                     }
                     proxy
                 } else {
-                    instance
+                    processedInstance
                 }
 
                 val totalMs = (System.nanoTime() - createStart) / 1_000_000.0
@@ -273,5 +297,34 @@ class LifecycleManager(
         return dependencies.mapNotNull { dependency ->
             resolveDependencyDefinition(dependency.type, dependency.nameQualifier, definitionByName)
         }
+    }
+
+    /**
+     * 按 @DependsOn 声明进行拓扑排序。
+     * 没有 @DependsOn 的 Bean 保持原有顺序。
+     */
+    private fun topologicalSort(definitions: List<BeanDefinition>): List<BeanDefinition> {
+        if (definitions.none { it.dependsOn.isNotEmpty() }) return definitions
+
+        val byName = definitions.associateBy { it.name }
+        val visited = mutableSetOf<String>()
+        val result = mutableListOf<BeanDefinition>()
+
+        fun visit(def: BeanDefinition) {
+            if (def.name in visited) return
+            visited.add(def.name)
+            for (depName in def.dependsOn) {
+                val depDef = byName[depName]
+                if (depDef != null) {
+                    visit(depDef)
+                }
+            }
+            result.add(def)
+        }
+
+        for (def in definitions) {
+            visit(def)
+        }
+        return result
     }
 }

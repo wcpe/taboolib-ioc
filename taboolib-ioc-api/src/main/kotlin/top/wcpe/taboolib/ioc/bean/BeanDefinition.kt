@@ -43,6 +43,7 @@ class BeanDefinition(
     val valueFields: List<ValueField> = emptyList(),
     val factoryBeanName: String? = null,
     val factoryMethod: Method? = null,
+    val dependsOn: List<String> = emptyList(),
     val postConstructMethods: List<Method> = listOfNotNull(postConstruct),
     val postEnableMethods: List<Method> = listOfNotNull(postEnable),
     val preDestroyMethods: List<Method> = listOfNotNull(preDestroy)

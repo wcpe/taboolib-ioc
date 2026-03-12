@@ -76,6 +76,7 @@ object ConfigurationScanner {
                 val lazyInit = method.getAnnotation(Lazy::class.java)?.value == true
                 val scope = method.getAnnotation(Scope::class.java)?.value?.let { BeanScopes.normalize(it) }
                     ?: BeanScopes.SINGLETON
+                val dependsOn = method.getAnnotation(DependsOn::class.java)?.value?.toList() ?: emptyList()
 
                 BeanDefinition(
                     name = beanName,
@@ -97,6 +98,7 @@ object ConfigurationScanner {
                     valueFields = valueFields,
                     factoryBeanName = configBeanName,
                     factoryMethod = method,
+                    dependsOn = dependsOn,
                     postConstructMethods = postConstructMethods,
                     postEnableMethods = postEnableMethods,
                     preDestroyMethods = preDestroyMethods

@@ -2,10 +2,12 @@ package top.wcpe.taboolib.ioc
 
 import top.wcpe.taboolib.ioc.annotation.ConditionContext
 import top.wcpe.taboolib.ioc.annotation.Configuration
+import top.wcpe.taboolib.ioc.annotation.PropertySource
 import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.aop.AspectScanner
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.BeanPostProcessor
 import top.wcpe.taboolib.ioc.bean.BeanResolver
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
@@ -15,6 +17,7 @@ import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
 import top.wcpe.taboolib.ioc.inject.FieldInjector
 import top.wcpe.taboolib.ioc.inject.Injector
+import top.wcpe.taboolib.ioc.inject.ValueResolver
 import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
 import top.wcpe.taboolib.ioc.scan.ClassScanner
 import top.wcpe.taboolib.ioc.scan.ConfigurationScanner
@@ -61,6 +64,13 @@ class IocTestContext {
 
         // 如果是 @Configuration 类，扫描其 @Bean 方法
         if (clazz.isAnnotationPresent(Configuration::class.java)) {
+            // 加载 @PropertySource 配置文件
+            val propertySource = clazz.getAnnotation(PropertySource::class.java)
+            if (propertySource != null) {
+                for (path in propertySource.value) {
+                    ValueResolver.loadProperties(path)
+                }
+            }
             val conditionContext = createConditionContext()
             val beanDefinitions = ConfigurationScanner.scan(clazz, definition.name)
             for (beanDef in beanDefinitions) {
@@ -125,7 +135,22 @@ class IocTestContext {
             val advisors = AspectScanner.scan(aspectInstance, definition.type)
             advisorRegistry.registerAll(advisors)
         }
+        // 发现并注册 BeanPostProcessor
+        val processorDefinitions = registry.getAll().filter {
+            BeanPostProcessor::class.java.isAssignableFrom(it.type)
+        }
+        for (definition in processorDefinitions) {
+            val processor = lifecycleManager.getOrCreateSingleton(definition)
+            if (processor is BeanPostProcessor) {
+                lifecycleManager.addBeanPostProcessor(processor)
+            }
+        }
         lifecycleManager.initialize()
+    }
+
+    /** 手动注册 BeanPostProcessor */
+    fun addBeanPostProcessor(processor: BeanPostProcessor) {
+        lifecycleManager.addBeanPostProcessor(processor)
     }
 
     /** 执行所有已初始化 singleton Bean 的 @PostEnable 方法 */

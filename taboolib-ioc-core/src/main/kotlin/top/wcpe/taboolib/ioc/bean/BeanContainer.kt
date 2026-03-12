@@ -150,6 +150,8 @@ object BeanContainer {
         try {
             // 先初始化切面 Bean 并解析 Advisor
             initializeAspects()
+            // 发现并注册 BeanPostProcessor
+            discoverBeanPostProcessors()
             // 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
             lifecycleManager.initialize()
             initialized = true
@@ -176,6 +178,25 @@ object BeanContainer {
             debug("[IoC] 切面 ${definition.name} 解析完成，共 ${advisors.size} 个通知器")
         }
         debug("[IoC] 切面解析完成，共 ${advisorRegistry.getAll().size} 个通知器")
+    }
+
+    /**
+     * 发现并注册 BeanPostProcessor。
+     */
+    private fun discoverBeanPostProcessors() {
+        val processorDefinitions = registry.getAll().filter {
+            BeanPostProcessor::class.java.isAssignableFrom(it.type)
+        }
+        if (processorDefinitions.isEmpty()) return
+
+        debug("[IoC] 发现 ${processorDefinitions.size} 个 BeanPostProcessor，开始注册")
+        for (definition in processorDefinitions) {
+            val processor = lifecycleManager.getOrCreateSingleton(definition)
+            if (processor is BeanPostProcessor) {
+                lifecycleManager.addBeanPostProcessor(processor)
+                debug("[IoC] 注册 BeanPostProcessor: ${definition.name}")
+            }
+        }
     }
 
     internal fun invokePostEnable() {

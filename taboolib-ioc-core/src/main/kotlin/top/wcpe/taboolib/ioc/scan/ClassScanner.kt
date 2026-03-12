@@ -47,6 +47,7 @@ class ClassScanner(
         val isPrimary = clazz.isAnnotationPresent(Primary::class.java)
         val order = clazz.getAnnotation(Order::class.java)?.value ?: Int.MAX_VALUE
         val valueFields = resolveValueFields(clazz)
+        val dependsOn = clazz.getAnnotation(DependsOn::class.java)?.value?.toList() ?: emptyList()
 
         return BeanDefinition(
             name = name,
@@ -65,6 +66,7 @@ class ClassScanner(
             isPrimary = isPrimary,
             order = order,
             valueFields = valueFields,
+            dependsOn = dependsOn,
             postConstructMethods = postConstructMethods,
             postEnableMethods = postEnableMethods,
             preDestroyMethods = preDestroyMethods

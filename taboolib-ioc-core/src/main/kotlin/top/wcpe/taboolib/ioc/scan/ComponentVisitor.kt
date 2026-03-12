@@ -6,9 +6,11 @@ import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import top.wcpe.taboolib.ioc.annotation.Configuration
+import top.wcpe.taboolib.ioc.annotation.PropertySource
 import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
+import top.wcpe.taboolib.ioc.inject.ValueResolver
 import taboolib.common.Inject as TabooLibInject
 
 /**
@@ -90,6 +92,14 @@ object ComponentVisitor : ClassVisitor(1) {
 
             // 如果是 @Configuration 类，扫描其 @Bean 方法
             if (javaClass.isAnnotationPresent(Configuration::class.java)) {
+                // 加载 @PropertySource 配置文件
+                val propertySource = javaClass.getAnnotation(PropertySource::class.java)
+                if (propertySource != null) {
+                    for (path in propertySource.value) {
+                        ValueResolver.loadProperties(path)
+                        debug("[IoC] 加载配置文件: $path")
+                    }
+                }
                 val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
                 for (beanDef in beanDefinitions) {
                     if (BeanContainer.getRegistry().contains(beanDef.name)) continue
@@ -130,6 +140,14 @@ object ComponentVisitor : ClassVisitor(1) {
 
                 // 如果是 @Configuration 类，扫描其 @Bean 方法
                 if (javaClass.isAnnotationPresent(Configuration::class.java)) {
+                    // 加载 @PropertySource 配置文件
+                    val propertySource = javaClass.getAnnotation(PropertySource::class.java)
+                    if (propertySource != null) {
+                        for (path in propertySource.value) {
+                            ValueResolver.loadProperties(path)
+                            debug("[IoC] 加载配置文件: $path")
+                        }
+                    }
                     val beanDefinitions = ConfigurationScanner.scan(javaClass, definition.name)
                     for (beanDef in beanDefinitions) {
                         if (BeanContainer.getRegistry().contains(beanDef.name)) continue
