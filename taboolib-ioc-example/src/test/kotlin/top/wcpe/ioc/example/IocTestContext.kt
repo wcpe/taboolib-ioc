@@ -1,0 +1,124 @@
+package top.wcpe.ioc.example
+
+import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.bean.BeanRegistry
+import top.wcpe.taboolib.ioc.bean.BeanScope
+import top.wcpe.taboolib.ioc.cycle.CycleDetector
+import top.wcpe.taboolib.ioc.cycle.CycleResolver
+import top.wcpe.taboolib.ioc.inject.ConstructorResolver
+import top.wcpe.taboolib.ioc.inject.FieldInjector
+import top.wcpe.taboolib.ioc.inject.Injector
+import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
+import top.wcpe.taboolib.ioc.scan.ClassScanner
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * 轻量级 IoC 测试上下文。
+ *
+ * 不依赖 TabooLib 运行时和 BeanContainer 单例，
+ * 可在纯 JUnit 环境中独立运行，方便编写单元测试。
+ *
+ * 用法：
+ * ```kotlin
+ * val ctx = IocTestContext()
+ * ctx.register(MyService::class.java)
+ * ctx.initialize()
+ * val bean = ctx.getBean(MyService::class.java)
+ * ```
+ */
+class IocTestContext {
+
+    val registry = BeanRegistry()
+    private val cycleResolver = CycleResolver()
+    private val cycleDetector = CycleDetector()
+    private val constructorResolver = ConstructorResolver()
+    private val fieldInjector = FieldInjector(registry, ::resolveBean)
+    private val injector = Injector(fieldInjector, ::resolveBean)
+    private val customScopes = ConcurrentHashMap<String, BeanScope>()
+    val lifecycleManager = LifecycleManager(
+        registry, cycleResolver, injector, cycleDetector
+    ) { name -> customScopes[name] }
+    private val scanner = ClassScanner(constructorResolver)
+    private val manualBeans = ConcurrentHashMap<String, Any>()
+
+    /** 扫描并注册一个组件类 */
+    fun register(clazz: Class<*>) {
+        val definition = scanner.scan(clazz) ?: error("扫描失败: ${clazz.name}")
+        registry.register(definition)
+    }
+
+    /** 手动注册一个 Bean 实例 */
+    fun registerBean(name: String, instance: Any) {
+        manualBeans[name] = instance
+        cycleResolver.addSingleton(name, instance)
+    }
+
+    /** 注册自定义作用域 */
+    fun registerScope(name: String, scope: BeanScope) {
+        customScopes[name] = scope
+    }
+
+    /** 初始化容器（预创建 eager singleton） */
+    fun initialize() {
+        lifecycleManager.initialize()
+    }
+
+    /** 按类型获取 Bean */
+    @Suppress("UNCHECKED_CAST")
+    fun <T> getBean(type: Class<T>, name: String? = null): T? {
+        if (name != null) {
+            manualBeans[name]?.takeIf { type.isInstance(it) }?.let { return it as T }
+        }
+        return resolveBean(type, name) as? T
+    }
+
+    /** 获取某类型的所有 Bean */
+    @Suppress("UNCHECKED_CAST")
+    fun <T> getBeansOfType(type: Class<T>): List<T> {
+        val registeredBeans = registry.getByType(type).mapNotNull { def ->
+            getBean(type, def.name)
+        }
+        val manual = manualBeans.values.filter { type.isInstance(it) }.map { type.cast(it) }
+        return (registeredBeans + manual).distinctBy { System.identityHashCode(it) }
+    }
+
+    /** 检查 Bean 是否存在 */
+    fun containsBean(name: String): Boolean = manualBeans.containsKey(name) || registry.contains(name)
+
+    /** 获取所有 Bean 名称 */
+    fun getBeanNames(): Set<String> = registry.getNames() + manualBeans.keys
+
+    /** 获取已创建的 singleton 实例 */
+    fun getSingleton(name: String): Any? = cycleResolver.getSingleton(name)
+
+    private fun resolveBean(type: Class<*>, name: String?): Any? {
+        // 先查手动注册
+        if (name != null) {
+            manualBeans[name]?.takeIf { type.isInstance(it) }?.let { return it }
+        }
+        // 再查已创建的 singleton
+        if (name != null) {
+            cycleResolver.getSingleton(name)?.takeIf { type.isInstance(it) }?.let { return it }
+        }
+        // 查 registry
+        val definition = if (name != null) {
+            registry.getByName(name)
+        } else {
+            registry.getPrimaryByType(type)
+        } ?: return null
+
+        if (!type.isAssignableFrom(definition.type)) return null
+
+        return when {
+            definition.isSingletonScope() -> lifecycleManager.getOrCreateSingleton(definition)
+            definition.isPrototypeScope() -> lifecycleManager.createTransient(definition)
+            else -> {
+                val scope = customScopes[definition.scope]
+                    ?: throw IllegalStateException("未注册的作用域: ${definition.scope}")
+                scope.get(definition.name, definition) {
+                    lifecycleManager.createTransient(definition)
+                }
+            }
+        }
+    }
+}

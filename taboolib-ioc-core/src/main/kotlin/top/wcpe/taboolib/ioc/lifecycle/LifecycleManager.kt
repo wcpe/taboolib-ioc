@@ -38,23 +38,34 @@ class LifecycleManager(
      */
     fun initialize() {
         val definitions = registry.getAll().toList()
+
+        val validateStart = System.nanoTime()
         validateScopes(definitions)
+        val validateMs = (System.nanoTime() - validateStart) / 1_000_000.0
+        debug("[IoC] 作用域验证完成，耗时 ${"%.2f".format(validateMs)}ms")
+
+        val cycleStart = System.nanoTime()
         logResolvableDependencyCycles(definitions.filter(BeanDefinition::isSingletonScope))
+        val cycleMs = (System.nanoTime() - cycleStart) / 1_000_000.0
+        debug("[IoC] 循环依赖检测完成，耗时 ${"%.2f".format(cycleMs)}ms")
 
         val eagerDefinitions = definitions.filter(BeanDefinition::isEagerSingleton)
-        debug("[IoC] 开始初始化容器，共 ${eagerDefinitions.size} 个预初始化 Bean")
-        debug("[IoC] 预初始化 Bean: ${eagerDefinitions.map { it.name }}")
+        debug("[IoC] 开始预初始化 ${eagerDefinitions.size} 个 eager singleton Bean")
 
+        val eagerStart = System.nanoTime()
         eagerDefinitions.forEach { definition ->
             try {
+                val beanStart = System.nanoTime()
                 getOrCreateSingleton(definition)
+                val beanMs = (System.nanoTime() - beanStart) / 1_000_000.0
+                debug("[IoC] 预初始化 Bean: ${definition.name}，耗时 ${"%.2f".format(beanMs)}ms")
             } catch (e: Exception) {
                 warning("[IoC] Bean 初始化失败: ${definition.name} - ${e.message}")
                 throw e
             }
         }
-
-        debug("[IoC] 容器初始化完成")
+        val eagerMs = (System.nanoTime() - eagerStart) / 1_000_000.0
+        debug("[IoC] 预初始化完成，共 ${eagerDefinitions.size} 个 Bean，耗时 ${"%.2f".format(eagerMs)}ms")
     }
 
     fun getOrCreateSingleton(definition: BeanDefinition): Any {
@@ -85,20 +96,25 @@ class LifecycleManager(
      * 关闭容器
      */
     fun shutdown() {
-        debug("[IoC] 开始关闭容器")
+        debug("[IoC] 开始关闭容器，共 ${initializationOrder.size} 个 singleton 需要销毁")
+        val start = System.nanoTime()
 
         for (name in initializationOrder.reversed()) {
             val definition = registry.getByName(name) ?: continue
+            val preDestroy = definition.preDestroy ?: continue
             try {
-                definition.preDestroy?.invoke(cycleResolver.getSingleton(name))
-                debug("[IoC] Bean 销毁完成: $name")
+                val destroyStart = System.nanoTime()
+                preDestroy.invoke(cycleResolver.getSingleton(name))
+                val destroyMs = (System.nanoTime() - destroyStart) / 1_000_000.0
+                debug("[IoC] Bean 销毁完成: $name，耗时 ${"%.2f".format(destroyMs)}ms")
             } catch (e: Exception) {
                 warning("[IoC] Bean 销毁失败: $name - ${e.message}")
             }
         }
 
         resetState()
-        debug("[IoC] 容器关闭完成")
+        val totalMs = (System.nanoTime() - start) / 1_000_000.0
+        debug("[IoC] 容器关闭完成，总耗时 ${"%.2f".format(totalMs)}ms")
     }
 
     private fun createBean(definition: BeanDefinition, cacheSingleton: Boolean): Any {
@@ -111,14 +127,33 @@ class LifecycleManager(
 
         stack.addLast(definition.name)
         try {
+            val createStart = System.nanoTime()
+
+            val instantiateStart = System.nanoTime()
             val instance = injector.instantiate(definition)
+            val instantiateMs = (System.nanoTime() - instantiateStart) / 1_000_000.0
+
             if (cacheSingleton) {
                 cycleResolver.addSingleton(definition.name, instance)
             }
 
             try {
+                val populateStart = System.nanoTime()
                 injector.populate(instance, definition)
+                val populateMs = (System.nanoTime() - populateStart) / 1_000_000.0
+
+                val postConstructStart = System.nanoTime()
                 injector.invokePostConstruct(instance, definition)
+                val postConstructMs = (System.nanoTime() - postConstructStart) / 1_000_000.0
+
+                val totalMs = (System.nanoTime() - createStart) / 1_000_000.0
+                debug(
+                    "[IoC] Bean 创建完成: ${definition.name} " +
+                        "[实例化=${"%.2f".format(instantiateMs)}ms, " +
+                        "注入=${"%.2f".format(populateMs)}ms, " +
+                        "PostConstruct=${"%.2f".format(postConstructMs)}ms, " +
+                        "总计=${"%.2f".format(totalMs)}ms]"
+                )
             } catch (e: Exception) {
                 if (cacheSingleton) {
                     cycleResolver.removeSingleton(definition.name)
@@ -129,7 +164,6 @@ class LifecycleManager(
 
             if (cacheSingleton && initializedSingletons.add(definition.name)) {
                 initializationOrder.add(definition.name)
-                debug("[IoC] Bean 初始化完成: ${definition.name}")
             }
             return instance
         } finally {

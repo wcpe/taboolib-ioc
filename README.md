@@ -401,5 +401,146 @@ ExampleReportService 销毁前回调
 - 如果构造函数不止一个，显式写 `@Inject constructor(...)`
 - singleton Bean 的字段或方法循环依赖会在早期暴露阶段完成；构造函数循环依赖会在初始化或首次解析时直接失败
 
+## 单元测试
+
+IoC 容器的一大优势是让业务组件可以脱离 Bukkit/TabooLib 运行时进行单元测试。项目提供了 `IocTestContext` 轻量测试上下文，在纯 JUnit 环境中即可完成依赖注入和容器行为验证。
+
+### 配置测试依赖
+
+在示例插件（或你自己的插件）的 `build.gradle.kts` 中添加：
+
+```kotlin
+dependencies {
+    // 生产依赖
+    taboo(project(":taboolib-ioc"))
+
+    // 测试依赖
+    testImplementation(project(":taboolib-ioc-core"))
+    testImplementation(project(":taboolib-ioc-api"))
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.1")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.1")
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
+}
+```
+
+### IocTestContext 测试上下文
+
+`IocTestContext` 是一个不依赖 `BeanContainer` 单例的独立容器，每个测试方法创建自己的实例，互不干扰：
+
+```kotlin
+val ctx = IocTestContext()
+ctx.register(UserRepository::class.java)   // 扫描并注册组件
+ctx.register(UserService::class.java)
+ctx.registerBean("config", AppConfig())    // 手动注册实例
+ctx.initialize()                           // 初始化容器
+
+val service = ctx.getBean(UserService::class.java)  // 获取 Bean
+```
+
+### 测试用例示例
+
+示例插件包含 15 个测试用例，覆盖 IoC 容器的全部核心能力：
+
+| # | 测试场景 | 说明 |
+|---|---------|------|
+| 1 | 构造函数注入 | `@Service` 通过 `@Inject constructor` 获取 `@Repository` 依赖 |
+| 2 | 字段注入 | `@Inject lateinit var` 自动注入依赖 |
+| 3 | 方法注入 | `@Inject fun bind(dep)` 方法参数自动注入 |
+| 4 | `@Named` 限定注入 | 同一接口多个实现时按名称选择 |
+| 5 | `@Resource` 方法限定注入 | `@Resource(name = ...)` 指定方法注入的实现 |
+| 6 | `@PostConstruct` 回调 | Bean 创建并注入完成后自动调用初始化方法 |
+| 7 | `@PreDestroy` 回调 | 容器关闭时调用销毁方法 |
+| 8 | `@Prototype` 作用域 | 每次获取都创建新实例 |
+| 9 | `@Lazy` 延迟初始化 | 首次获取时才创建，且为单例 |
+| 10 | 自定义 `@Scope` | 注册自定义作用域控制 Bean 生命周期 |
+| 11 | 手动注册 Bean | `registerBean` 注册的实例可被容器查询 |
+| 12 | 接口类型解析 | 通过接口类型获取具体实现 |
+| 13 | `getBeansOfType` 聚合查询 | 获取某接口的所有实现 |
+| 14 | 字段循环依赖解析 | singleton Bean 的字段循环依赖可正常解析 |
+| 15 | 构造函数循环依赖拒绝 | 构造函数循环依赖抛出异常并包含依赖链 |
+
+#### 示例：构造函数注入测试
+
+```kotlin
+@Test
+fun `构造函数注入 - Service 通过构造函数获取 Repository 依赖`() {
+    val ctx = IocTestContext()
+    ctx.register(SimpleUserRepository::class.java)
+    ctx.register(SimpleUserService::class.java)
+    ctx.initialize()
+
+    val service = ctx.getBean(SimpleUserService::class.java)
+
+    assertNotNull(service)
+    assertEquals("user-alice", service!!.findUser("alice"))
+}
+```
+
+#### 示例：@Named 多实现选择测试
+
+```kotlin
+@Test
+fun `Named限定注入 - 同一接口多个实现时按名称选择`() {
+    val ctx = IocTestContext()
+    ctx.register(JsonSerializer::class.java)
+    ctx.register(XmlSerializer::class.java)
+    ctx.register(NamedConsumer::class.java)
+    ctx.initialize()
+
+    val consumer = ctx.getBean(NamedConsumer::class.java)
+
+    assertNotNull(consumer)
+    assertEquals("json", consumer!!.primaryFormat())
+    assertEquals("xml", consumer.secondaryFormat())
+}
+```
+
+#### 示例：Prototype 作用域测试
+
+```kotlin
+@Test
+fun `Prototype作用域 - 每次获取都创建新实例`() {
+    PrototypeCounter.count = 0
+    val ctx = IocTestContext()
+    ctx.register(PrototypeCounter::class.java)
+    ctx.initialize()
+
+    val first = ctx.getBean(PrototypeCounter::class.java)
+    val second = ctx.getBean(PrototypeCounter::class.java)
+
+    assertNotSame(first, second)
+    assertEquals(1, first!!.id)
+    assertEquals(2, second!!.id)
+}
+```
+
+#### 示例：字段循环依赖测试
+
+```kotlin
+@Test
+fun `字段循环依赖 - singleton Bean 的字段循环依赖可正常解析`() {
+    val ctx = IocTestContext()
+    ctx.register(CycleNodeA::class.java)
+    ctx.register(CycleNodeB::class.java)
+    ctx.initialize()
+
+    val a = ctx.getBean(CycleNodeA::class.java)
+    val b = ctx.getBean(CycleNodeB::class.java)
+
+    assertSame(b, a!!.nodeB)
+    assertSame(a, b!!.nodeA)
+}
+```
+
+完整测试代码见：`taboolib-ioc-example/src/test/kotlin/top/wcpe/ioc/example/ExamplePluginIoCTest.kt`
+
+运行测试：
+
+```bash
+./gradlew :taboolib-ioc-example:test
+```
 
 

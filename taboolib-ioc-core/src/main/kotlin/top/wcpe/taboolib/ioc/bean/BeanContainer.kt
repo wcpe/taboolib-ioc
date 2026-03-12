@@ -105,6 +105,7 @@ object BeanContainer {
     internal fun initialize() {
         if (initialized) return
 
+        val start = System.nanoTime()
         debug("[IoC] 开始初始化容器，共 ${registry.getAll().size} 个 Bean 定义")
 
         initializing = true
@@ -114,11 +115,15 @@ object BeanContainer {
         } finally {
             initializing = false
         }
+
+        val ms = (System.nanoTime() - start) / 1_000_000.0
+        debug("[IoC] BeanContainer 初始化完成，总耗时 ${"%.2f".format(ms)}ms")
     }
 
     internal fun shutdown() {
         if (!initialized) return
 
+        val start = System.nanoTime()
         lifecycleManager.shutdown()
         clearScopes()
         cycleResolver.clear()
@@ -126,7 +131,8 @@ object BeanContainer {
         manualBeansByName.clear()
         initialized = false
 
-        debug("[IoC] 容器已关闭")
+        val ms = (System.nanoTime() - start) / 1_000_000.0
+        debug("[IoC] 容器已关闭，总耗时 ${"%.2f".format(ms)}ms")
     }
 
     internal fun getRegistry(): BeanRegistry = registry
