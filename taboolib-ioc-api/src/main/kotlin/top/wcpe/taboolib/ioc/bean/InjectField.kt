@@ -11,12 +11,14 @@ import java.lang.reflect.Field
  * @property requiredType 需要注入的类型
  * @property nameQualifier 名称限定符（来自 @Named 或 @Resource）
  * @property lazy 是否延迟注入
+ * @property required 是否必须注入成功
  */
 class InjectField(
     val field: Field,
     val requiredType: Class<*>,
     val nameQualifier: String?,
-    val lazy: Boolean = false
+    val lazy: Boolean = false,
+    val required: Boolean = true
 ) {
     init {
         field.isAccessible = true

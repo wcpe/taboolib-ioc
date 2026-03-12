@@ -29,12 +29,18 @@ class FieldInjector(
                 if (value != null) {
                     injectField.field.isAccessible = true
                     injectField.field.set(instance, value)
-                } else {
-                    warning(
-                        "[IoC] 字段注入失败: ${instance.javaClass.simpleName}.${injectField.field.name}" +
+                } else if (injectField.required) {
+                    throw IllegalStateException(
+                        "[IoC] 必需的字段注入失败: ${instance.javaClass.simpleName}.${injectField.field.name}" +
                             " (类型=${injectField.requiredType.simpleName}" +
                             "${if (injectField.nameQualifier != null) ", 名称=${injectField.nameQualifier}" else ""})" +
-                            " — 未找到匹配的 Bean"
+                            " — 未找到匹配的 Bean。如果该依赖是可选的，请使用 @Inject(required=false)"
+                    )
+                } else {
+                    warning(
+                        "[IoC] 可选字段注入未找到匹配 Bean: ${instance.javaClass.simpleName}.${injectField.field.name}" +
+                            " (类型=${injectField.requiredType.simpleName}" +
+                            "${if (injectField.nameQualifier != null) ", 名称=${injectField.nameQualifier}" else ""})"
                     )
                 }
             }

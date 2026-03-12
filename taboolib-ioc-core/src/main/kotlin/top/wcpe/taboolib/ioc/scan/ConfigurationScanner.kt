@@ -54,6 +54,15 @@ object ConfigurationScanner {
                 val preDestroy = returnType.declaredMethods.firstOrNull {
                     it.isAnnotationPresent(PreDestroy::class.java)
                 }
+                val postConstructMethods = returnType.declaredMethods.filter {
+                    it.isAnnotationPresent(PostConstruct::class.java)
+                }
+                val postEnableMethods = returnType.declaredMethods.filter {
+                    it.isAnnotationPresent(PostEnable::class.java)
+                }
+                val preDestroyMethods = returnType.declaredMethods.filter {
+                    it.isAnnotationPresent(PreDestroy::class.java)
+                }
 
                 // 扫描返回类型上的 @Inject 字段
                 val injectFields = resolveInjectFields(returnType)
@@ -87,7 +96,10 @@ object ConfigurationScanner {
                     order = order,
                     valueFields = valueFields,
                     factoryBeanName = configBeanName,
-                    factoryMethod = method
+                    factoryMethod = method,
+                    postConstructMethods = postConstructMethods,
+                    postEnableMethods = postEnableMethods,
+                    preDestroyMethods = preDestroyMethods
                 )
             }
     }
@@ -108,11 +120,15 @@ object ConfigurationScanner {
                 else -> null
             }
 
+            val injectAnnotation = field.findAnnotation(Inject::class.java)
+            val required = injectAnnotation?.required ?: true
+
             InjectField(
                 field = field,
                 requiredType = field.type,
                 nameQualifier = nameQualifier,
-                lazy = lazy?.value == true
+                lazy = lazy?.value == true,
+                required = required
             )
         }
     }

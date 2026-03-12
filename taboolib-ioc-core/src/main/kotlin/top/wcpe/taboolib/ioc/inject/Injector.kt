@@ -81,9 +81,12 @@ class Injector(
 
     /**
      * 调用初始化回调。
+     * 遍历所有 @PostConstruct 方法。
      */
     fun invokePostConstruct(instance: Any, definition: BeanDefinition) {
-        definition.postConstruct?.invoke(instance)
+        for (method in definition.postConstructMethods) {
+            method.invoke(instance)
+        }
     }
 
     /**

@@ -103,14 +103,17 @@ class LifecycleManager(
 
         for (name in initializationOrder) {
             val definition = registry.getByName(name) ?: continue
-            val postEnable = definition.postEnable ?: continue
-            try {
-                val invokeStart = System.nanoTime()
-                postEnable.invoke(cycleResolver.getSingleton(name))
-                val invokeMs = (System.nanoTime() - invokeStart) / 1_000_000.0
-                debug("[IoC] @PostEnable 执行完成: $name，耗时 ${"%.2f".format(invokeMs)}ms")
-            } catch (e: Exception) {
-                warning("[IoC] @PostEnable 执行失败: $name - ${e.message}")
+            if (definition.postEnableMethods.isEmpty()) continue
+            val instance = cycleResolver.getSingleton(name) ?: continue
+            for (postEnable in definition.postEnableMethods) {
+                try {
+                    val invokeStart = System.nanoTime()
+                    postEnable.invoke(instance)
+                    val invokeMs = (System.nanoTime() - invokeStart) / 1_000_000.0
+                    debug("[IoC] @PostEnable 执行完成: $name.${postEnable.name}，耗时 ${"%.2f".format(invokeMs)}ms")
+                } catch (e: Exception) {
+                    warning("[IoC] @PostEnable 执行失败: $name.${postEnable.name} - ${e.message}")
+                }
             }
         }
 
@@ -137,13 +140,13 @@ class LifecycleManager(
 
         for (name in initializationOrder.reversed()) {
             val definition = registry.getByName(name) ?: continue
-            val preDestroy = definition.preDestroy
+            val instance = cycleResolver.getSingleton(name)
             try {
-                if (preDestroy != null) {
+                for (preDestroy in definition.preDestroyMethods) {
                     val destroyStart = System.nanoTime()
-                    preDestroy.invoke(cycleResolver.getSingleton(name))
+                    preDestroy.invoke(instance)
                     val destroyMs = (System.nanoTime() - destroyStart) / 1_000_000.0
-                    debug("[IoC] Bean 销毁完成: $name，耗时 ${"%.2f".format(destroyMs)}ms")
+                    debug("[IoC] Bean 销毁完成: $name.${preDestroy.name}，耗时 ${"%.2f".format(destroyMs)}ms")
                 }
                 eventBus.publish(BeanDestroyedEvent(name, definition))
             } catch (e: Exception) {

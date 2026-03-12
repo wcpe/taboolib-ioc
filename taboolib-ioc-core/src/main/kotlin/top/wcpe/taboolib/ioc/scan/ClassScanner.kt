@@ -39,6 +39,9 @@ class ClassScanner(
         val postConstruct = findPostConstruct(clazz)
         val postEnable = findPostEnable(clazz)
         val preDestroy = findPreDestroy(clazz)
+        val postConstructMethods = findAllPostConstruct(clazz)
+        val postEnableMethods = findAllPostEnable(clazz)
+        val preDestroyMethods = findAllPreDestroy(clazz)
         val lazyInit = resolveLazyInit(clazz)
         val scope = resolveScope(clazz)
         val isPrimary = clazz.isAnnotationPresent(Primary::class.java)
@@ -61,7 +64,10 @@ class ClassScanner(
             isAspect = isAspect,
             isPrimary = isPrimary,
             order = order,
-            valueFields = valueFields
+            valueFields = valueFields,
+            postConstructMethods = postConstructMethods,
+            postEnableMethods = postEnableMethods,
+            preDestroyMethods = preDestroyMethods
         )
     }
 
@@ -160,11 +166,15 @@ class ClassScanner(
                 else -> null
             }
 
+            val injectAnnotation = field.findAnnotation(Inject::class.java)
+            val required = injectAnnotation?.required ?: true
+
             InjectField(
                 field = field,
                 requiredType = field.type,
                 nameQualifier = nameQualifier,
-                lazy = lazy?.value == true
+                lazy = lazy?.value == true,
+                required = required
             )
         }
     }
@@ -213,6 +223,21 @@ class ClassScanner(
      */
     private fun findPreDestroy(clazz: Class<*>): java.lang.reflect.Method? {
         return clazz.declaredMethods.firstOrNull { it.isAnnotationPresent(PreDestroy::class.java) }
+    }
+
+    /** 查找所有 @PostConstruct 方法 */
+    private fun findAllPostConstruct(clazz: Class<*>): List<java.lang.reflect.Method> {
+        return clazz.declaredMethods.filter { it.isAnnotationPresent(PostConstruct::class.java) }
+    }
+
+    /** 查找所有 @PostEnable 方法 */
+    private fun findAllPostEnable(clazz: Class<*>): List<java.lang.reflect.Method> {
+        return clazz.declaredMethods.filter { it.isAnnotationPresent(PostEnable::class.java) }
+    }
+
+    /** 查找所有 @PreDestroy 方法 */
+    private fun findAllPreDestroy(clazz: Class<*>): List<java.lang.reflect.Method> {
+        return clazz.declaredMethods.filter { it.isAnnotationPresent(PreDestroy::class.java) }
     }
 
     /**

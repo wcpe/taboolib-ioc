@@ -42,13 +42,16 @@ class BeanDefinition(
     val order: Int = Int.MAX_VALUE,
     val valueFields: List<ValueField> = emptyList(),
     val factoryBeanName: String? = null,
-    val factoryMethod: Method? = null
+    val factoryMethod: Method? = null,
+    val postConstructMethods: List<Method> = listOfNotNull(postConstruct),
+    val postEnableMethods: List<Method> = listOfNotNull(postEnable),
+    val preDestroyMethods: List<Method> = listOfNotNull(preDestroy)
 ) {
     init {
         constructor?.isAccessible = true
-        postConstruct?.isAccessible = true
-        postEnable?.isAccessible = true
-        preDestroy?.isAccessible = true
+        postConstructMethods.forEach { it.isAccessible = true }
+        postEnableMethods.forEach { it.isAccessible = true }
+        preDestroyMethods.forEach { it.isAccessible = true }
         factoryMethod?.isAccessible = true
     }
 
