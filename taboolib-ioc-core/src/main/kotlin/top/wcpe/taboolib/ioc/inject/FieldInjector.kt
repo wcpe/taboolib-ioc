@@ -94,13 +94,14 @@ class FieldInjector(
             if (definition != null && type.isAssignableFrom(definition.type)) {
                 return beanProvider(type, nameQualifier)
             }
-            return null
+            // registry 中未找到，回退到 beanProvider（可能是手动注册的 Bean）
+            return beanProvider(type, nameQualifier)
         }
 
         // 按类型查找
         val definitions = registry.getByType(type)
         return when {
-            definitions.isEmpty() -> null
+            definitions.isEmpty() -> beanProvider(type, null)
             definitions.size == 1 -> beanProvider(type, null)
             else -> beanProvider(type, definitions.first().name)
         }
