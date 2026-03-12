@@ -36,8 +36,9 @@ class IocTestContext {
     private val injector = Injector(fieldInjector, ::resolveBean)
     private val customScopes = ConcurrentHashMap<String, BeanScope>()
     val lifecycleManager = LifecycleManager(
-        registry, cycleResolver, injector, cycleDetector
-    ) { name -> customScopes[name] }
+        registry, cycleResolver, injector, cycleDetector,
+        scopeLookup = { name -> customScopes[name] }
+    )
     private val scanner = ClassScanner(constructorResolver)
     private val manualBeans = ConcurrentHashMap<String, Any>()
 

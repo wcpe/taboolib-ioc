@@ -67,12 +67,17 @@ object ObjectInjector {
     }
 
     private fun requiresObjectInjection(clazz: Class<*>): Boolean {
-        if (!isObjectClass(clazz)) return false
-        return clazz.declaredFields.any { field ->
-            field.name != "INSTANCE" && (
-                field.hasAnnotation(top.wcpe.taboolib.ioc.annotation.Inject::class.java) ||
-                    field.findAnnotation(Resource::class.java) != null
-                )
+        return try {
+            if (!isObjectClass(clazz)) return false
+            clazz.declaredFields.any { field ->
+                field.name != "INSTANCE" && (
+                    field.hasAnnotation(top.wcpe.taboolib.ioc.annotation.Inject::class.java) ||
+                        field.findAnnotation(Resource::class.java) != null
+                    )
+            }
+        } catch (e: NoClassDefFoundError) {
+            debug("[IoC] 跳过类 ${clazz.name}，缺少依赖: ${e.message}")
+            false
         }
     }
 
@@ -83,6 +88,8 @@ object ObjectInjector {
         return try {
             clazz.getDeclaredField("INSTANCE") != null
         } catch (e: NoSuchFieldException) {
+            false
+        } catch (e: NoClassDefFoundError) {
             false
         }
     }
