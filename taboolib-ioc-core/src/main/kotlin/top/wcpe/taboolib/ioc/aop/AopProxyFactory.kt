@@ -1,5 +1,6 @@
 package top.wcpe.taboolib.ioc.aop
 
+import taboolib.common.platform.function.warning
 import java.lang.reflect.Proxy
 
 /**
@@ -29,6 +30,11 @@ class AopProxyFactory(
         val interfaces = collectInterfaces(beanClass)
         if (interfaces.isEmpty()) {
             // 无接口，无法创建 JDK 动态代理
+            warning(
+                "[IoC] AOP 代理跳过: ${beanClass.name} 没有实现任何接口，" +
+                    "但有 ${matchingAdvisors.size} 个匹配的通知器。" +
+                    "JDK 动态代理要求目标类至少实现一个接口"
+            )
             return instance
         }
 
