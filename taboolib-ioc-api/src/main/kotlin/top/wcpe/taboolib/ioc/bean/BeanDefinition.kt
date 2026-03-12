@@ -30,7 +30,8 @@ class BeanDefinition(
     val constructorParameters: List<InjectParameter>,
     val dependencies: List<InjectParameter>,
     val lazyInit: Boolean = false,
-    val scope: String = BeanScopes.SINGLETON
+    val scope: String = BeanScopes.SINGLETON,
+    val isAspect: Boolean = false
 ) {
     init {
         constructor.isAccessible = true

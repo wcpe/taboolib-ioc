@@ -2,6 +2,10 @@ package top.wcpe.taboolib.ioc.bean
 
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
+import top.wcpe.taboolib.ioc.annotation.ConditionContext
+import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
+import top.wcpe.taboolib.ioc.aop.AopProxyFactory
+import top.wcpe.taboolib.ioc.aop.AspectScanner
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
@@ -9,6 +13,8 @@ import top.wcpe.taboolib.ioc.inject.FieldInjector
 import top.wcpe.taboolib.ioc.inject.Injector
 import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
 import top.wcpe.taboolib.ioc.scan.ClassScanner
+import top.wcpe.taboolib.ioc.scope.RefreshBeanScope
+import top.wcpe.taboolib.ioc.scope.ThreadBeanScope
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -34,6 +40,8 @@ object BeanContainer {
     private val cycleResolver = CycleResolver()
     private val constructorResolver = ConstructorResolver()
     private val scanner = ClassScanner(constructorResolver)
+    private val advisorRegistry = AdvisorRegistry()
+    private val aopProxyFactory = AopProxyFactory(advisorRegistry)
     private val fieldInjector = FieldInjector(registry) { type, name ->
         getBean(type, name)
     }
@@ -45,7 +53,8 @@ object BeanContainer {
         cycleResolver = cycleResolver,
         injector = injector,
         cycleDetector = cycleDetector,
-        scopeLookup = ::getScope
+        scopeLookup = ::getScope,
+        aopProxyFactory = aopProxyFactory
     )
 
     @Volatile
@@ -101,6 +110,25 @@ object BeanContainer {
         customScopes[normalized] = scope
         debug("[IoC] 注册自定义作用域: $normalized")
     }
+    /**
+     * 刷新 refresh 作用域中的 Bean。
+     *
+     * @param name Bean 名称，为 null 时刷新全部
+     */
+    fun refreshScope(name: String? = null) {
+        val scope = customScopes[BeanScopes.REFRESH] as? RefreshBeanScope
+            ?: return
+        scope.refresh(name)
+        debug("[IoC] 刷新 refresh 作用域: ${name ?: "全部"}")
+    }
+
+    /**
+     * 获取线程作用域实例（用于手动清理当前线程缓存）。
+     */
+    fun getThreadScope(): ThreadBeanScope? {
+        return customScopes[BeanScopes.THREAD] as? ThreadBeanScope
+    }
+
 
     /**
      * 为 object 类的 @Lazy 字段注入延迟代理。
@@ -113,11 +141,16 @@ object BeanContainer {
     internal fun initialize() {
         if (initialized) return
 
+        registerBuiltinScopes()
+
         val start = System.nanoTime()
         debug("[IoC] 开始初始化容器，共 ${registry.getAll().size} 个 Bean 定义")
 
         initializing = true
         try {
+            // 先初始化切面 Bean 并解析 Advisor
+            initializeAspects()
+            // 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
             lifecycleManager.initialize()
             initialized = true
         } finally {
@@ -128,12 +161,30 @@ object BeanContainer {
         debug("[IoC] BeanContainer 初始化完成，总耗时 ${"%.2f".format(ms)}ms")
     }
 
+    /**
+     * 初始化切面 Bean 并解析 Advisor。
+     */
+    private fun initializeAspects() {
+        val aspectDefinitions = registry.getAll().filter { it.isAspect }
+        if (aspectDefinitions.isEmpty()) return
+
+        debug("[IoC] 发现 ${aspectDefinitions.size} 个切面，开始解析")
+        for (definition in aspectDefinitions) {
+            val aspectInstance = lifecycleManager.getOrCreateSingleton(definition)
+            val advisors = AspectScanner.scan(aspectInstance, definition.type)
+            advisorRegistry.registerAll(advisors)
+            debug("[IoC] 切面 ${definition.name} 解析完成，共 ${advisors.size} 个通知器")
+        }
+        debug("[IoC] 切面解析完成，共 ${advisorRegistry.getAll().size} 个通知器")
+    }
+
     internal fun shutdown() {
         if (!initialized) return
 
         val start = System.nanoTime()
         lifecycleManager.shutdown()
         clearScopes()
+        advisorRegistry.clear()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
@@ -147,9 +198,23 @@ object BeanContainer {
 
     internal fun getScanner(): ClassScanner = scanner
 
+    internal fun createConditionContext(): ConditionContext {
+        return object : ConditionContext {
+            override fun getClassLoader(): ClassLoader =
+                Thread.currentThread().contextClassLoader ?: BeanContainer::class.java.classLoader
+
+            override fun containsBeanDefinition(name: String): Boolean =
+                registry.contains(name)
+
+            override fun getBeanNamesForType(type: Class<*>): List<String> =
+                registry.getByType(type).map { it.name }
+        }
+    }
+
     internal fun resetForTesting() {
         lifecycleManager.resetState()
         clearScopes()
+        advisorRegistry.clear()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
@@ -186,6 +251,15 @@ object BeanContainer {
 
     private fun resolveManualBean(type: Class<*>): Any? {
         return manualBeansByName.values.firstOrNull { type.isInstance(it) }
+    }
+
+    private fun registerBuiltinScopes() {
+        if (!customScopes.containsKey(BeanScopes.THREAD)) {
+            customScopes[BeanScopes.THREAD] = ThreadBeanScope()
+        }
+        if (!customScopes.containsKey(BeanScopes.REFRESH)) {
+            customScopes[BeanScopes.REFRESH] = RefreshBeanScope()
+        }
     }
 
     private fun clearScopes() {

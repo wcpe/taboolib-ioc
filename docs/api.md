@@ -253,6 +253,268 @@ annotation class PreDestroy
 - 方法无参数
 - 一个类最多保留一个有效方法
 
+### `@Aspect`
+
+标记一个类为切面。切面类会自动注册为组件，无需额外标记 `@Component`。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Aspect
+```
+
+说明：
+
+- 切面类中可以定义 `@Before`、`@After`、`@Around` 通知方法
+- 切面 Bean 在容器初始化时优先创建，确保普通 Bean 创建时 AOP 代理已就绪
+- 切面 Bean 自身不会被 AOP 代理
+
+### `@Before`
+
+前置通知，在目标方法执行之前调用。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Before(val value: String)
+```
+
+- `value`：切点表达式，格式为 `execution(类名.方法名)`
+- 通知方法可以无参，也可以接收与目标方法相同的参数
+
+示例：
+
+```kotlin
+@Aspect
+class LogAspect {
+    @Before("execution(OrderService.placeOrder)")
+    fun beforeOrder() {
+        println("准备下单")
+    }
+}
+```
+
+### `@After`
+
+后置通知，在目标方法执行之后调用（无论是否抛出异常）。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class After(val value: String)
+```
+
+- `value`：切点表达式
+- 即使目标方法抛出异常，`@After` 通知仍会执行
+
+### `@Around`
+
+环绕通知，包裹目标方法的执行。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Around(val value: String)
+```
+
+- `value`：切点表达式
+- 通知方法必须接收一个 `MethodInvocation` 参数
+- 必须调用 `invocation.proceed()` 继续执行，否则目标方法不会被调用（短路）
+- 可以修改返回值
+
+示例：
+
+```kotlin
+@Aspect
+class TimingAspect {
+    @Around("execution(OrderService.placeOrder)")
+    fun timing(invocation: MethodInvocation): Any? {
+        val start = System.currentTimeMillis()
+        val result = invocation.proceed()
+        println("耗时: ${System.currentTimeMillis() - start}ms")
+        return result
+    }
+}
+```
+
+### `@Pointcut`
+
+定义可复用的切点表达式，其他通知注解可以通过方法名引用。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Pointcut(val value: String)
+```
+
+示例：
+
+```kotlin
+@Aspect
+class MyAspect {
+    @Pointcut("execution(OrderService.*)")
+    fun orderMethods() {}
+
+    @Before("orderMethods")  // 通过方法名引用切点
+    fun beforeOrder() { ... }
+}
+```
+
+### 切点表达式语法
+
+| 格式 | 说明 |
+|------|------|
+| `execution(类名.方法名)` | 精确匹配（支持简单类名和全限定名） |
+| `execution(*.方法名)` | 匹配所有类的指定方法 |
+| `execution(包名..*.方法名)` | 匹配包及子包下所有类的指定方法 |
+| `execution(类名.*)` | 匹配类的所有方法 |
+
+也可以省略 `execution()` 包裹，直接写 `类名.方法名`。
+
+### `MethodInvocation`
+
+`@Around` 通知的方法调用上下文。
+
+```kotlin
+class MethodInvocation(
+    val target: Any,           // 目标对象
+    val method: Method,        // 被调用的方法
+    val arguments: Array<out Any?>?  // 方法参数
+) {
+    fun proceed(): Any?        // 继续执行拦截器链或目标方法
+}
+```
+
+### `@Conditional`
+
+通用条件注解，指定一个或多个 `Condition` 实现类。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Conditional(vararg val value: KClass<out Condition>)
+```
+
+- 多个 Condition 之间为 AND 关系，全部满足才注册
+- `Condition` 接口需实现 `fun matches(context: ConditionContext): Boolean`
+
+### `@ConditionalOnClass`
+
+当指定的类存在于 ClassPath 中时注册。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConditionalOnClass(vararg val value: String)
+```
+
+- `value`：类的全限定名
+- 多个类名之间为 AND 关系
+
+### `@ConditionalOnMissingClass`
+
+当指定的类不存在于 ClassPath 中时注册。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConditionalOnMissingClass(vararg val value: String)
+```
+
+### `@ConditionalOnBean`
+
+当容器中存在指定类型或名称的 Bean 时注册。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConditionalOnBean(
+    vararg val value: KClass<*> = [],
+    val name: Array<String> = []
+)
+```
+
+- `value` 和 `name` 之间为 AND 关系
+- 在阶段二（所有非条件 Bean 注册后）评估
+
+### `@ConditionalOnMissingBean`
+
+当容器中不存在指定类型或名称的 Bean 时注册。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConditionalOnMissingBean(
+    vararg val value: KClass<*> = [],
+    val name: Array<String> = []
+)
+```
+
+### `@ConditionalOnProperty`
+
+当系统属性匹配指定值时注册。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConditionalOnProperty(
+    val name: String,
+    val havingValue: String = "",
+    val matchIfMissing: Boolean = false
+)
+```
+
+- `havingValue` 为空时，仅检查属性是否存在
+- `matchIfMissing`：属性不存在时是否视为匹配
+
+### `Condition` 接口
+
+自定义条件实现接口。
+
+```kotlin
+interface Condition {
+    fun matches(context: ConditionContext): Boolean
+}
+```
+
+### `ConditionContext` 接口
+
+条件评估上下文，提供容器和类加载器信息。
+
+```kotlin
+interface ConditionContext {
+    fun getClassLoader(): ClassLoader
+    fun containsBeanDefinition(name: String): Boolean
+    fun getBeanNamesForType(type: Class<*>): List<String>
+}
+```
+
+### `@ThreadScope`
+
+线程作用域快捷注解，等价于 `@Scope("thread")`。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ThreadScope
+```
+
+- 每个线程持有独立的 Bean 实例
+- 通过 `BeanContainer.getThreadScope()?.clearCurrentThread()` 清理当前线程缓存
+
+### `@RefreshScope`
+
+可刷新作用域快捷注解，等价于 `@Scope("refresh")`。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class RefreshScope
+```
+
+- Bean 实例会被缓存，通过 `BeanContainer.refreshScope()` 触发重建
+- 支持按名称刷新：`BeanContainer.refreshScope("beanName")`
+
 ## 循环依赖
 
 - singleton Bean 的字段注入和方法注入循环依赖会在早期暴露阶段完成
@@ -371,6 +633,46 @@ BeanContainer.registerScope("conversation", object : BeanScope {
     }
 })
 ```
+
+### `refreshScope(name?)`
+
+```kotlin
+fun refreshScope(name: String? = null)
+```
+
+行为：
+
+- 刷新 `refresh` 作用域中的 Bean 缓存
+- `name` 不为空时，仅刷新指定 Bean；为空时刷新全部
+- 下次获取时会重新创建实例
+
+示例：
+
+```kotlin
+// 刷新所有 refresh 作用域的 Bean
+BeanContainer.refreshScope()
+
+// 刷新指定 Bean
+BeanContainer.refreshScope("dynamicConfig")
+```
+
+### `getThreadScope()`
+
+```kotlin
+fun getThreadScope(): ThreadBeanScope?
+```
+
+行为：
+
+- 获取内置的线程作用域实例
+- 可用于手动清理当前线程的 Bean 缓存
+
+示例：
+
+```kotlin
+// 清理当前线程的所有 ThreadScope Bean 缓存
+BeanContainer.getThreadScope()?.clearCurrentThread()
+```
 ## 扫描与生命周期
 
 ### 扫描时机
@@ -451,6 +753,26 @@ object PluginState {
 - singleton Bean 支持字段/方法注入形成的循环依赖早期暴露
 - prototype / 自定义作用域 Bean 采用按需创建，不提供单例式的循环依赖缓存
 - 自定义作用域实例如何缓存、何时失效，由 `BeanScope` 实现自行决定
+- `@ThreadScope` 和 `@RefreshScope` 是内置作用域，容器初始化时自动注册，无需手动调用 `registerScope`
+
+## AOP 说明
+
+- AOP 基于 JDK 动态代理实现，目标 Bean 必须实现接口才能被代理
+- 没有实现接口的 Bean 即使有匹配的 Advisor 也不会被代理
+- 切面 Bean 在容器初始化时优先创建，确保普通 Bean 创建时 AOP 代理已就绪
+- 切面 Bean 自身不会被 AOP 代理
+- `@After` 通知在目标方法抛出异常时仍会执行
+- `@Around` 通知不调用 `proceed()` 时，目标方法不会被执行（短路）
+- 多个 `@Around` 通知会形成拦截器链，按注册顺序依次执行
+
+## 条件装配说明
+
+条件评估分两阶段：
+
+1. 扫描时（阶段一）：评估 `@Conditional`、`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnProperty`
+2. 注册后（阶段二）：评估 `@ConditionalOnBean`、`@ConditionalOnMissingBean`
+
+同一个类上可以叠加多个条件注解，所有条件之间为 AND 关系。
 
 
 

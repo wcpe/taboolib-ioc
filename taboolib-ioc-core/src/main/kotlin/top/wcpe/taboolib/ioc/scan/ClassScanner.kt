@@ -19,8 +19,16 @@ class ClassScanner(
     fun scan(clazz: Class<*>): BeanDefinition? {
         if (!isComponent(clazz)) return null
 
-        val annotation = findComponentAnnotation(clazz) ?: return null
-        val name = resolveBeanName(clazz, annotation)
+        val isAspect = clazz.isAnnotationPresent(Aspect::class.java)
+        val annotation = findComponentAnnotation(clazz)
+        // @Aspect 类不需要额外的 @Component 注解
+        val name = if (annotation != null) {
+            resolveBeanName(clazz, annotation)
+        } else if (isAspect) {
+            clazz.simpleName.replaceFirstChar { it.lowercase() }
+        } else {
+            return null
+        }
         val constructor = constructorResolver.resolve(clazz)
         val constructorParameters = resolveConstructorParameters(constructor)
         val injectFields = resolveInjectFields(clazz)
@@ -44,7 +52,8 @@ class ClassScanner(
             postConstruct = postConstruct,
             preDestroy = preDestroy,
             lazyInit = lazyInit,
-            scope = scope
+            scope = scope,
+            isAspect = isAspect
         )
     }
 
@@ -55,7 +64,8 @@ class ClassScanner(
         return clazz.isAnnotationPresent(Component::class.java) ||
             clazz.isAnnotationPresent(Service::class.java) ||
             clazz.isAnnotationPresent(Repository::class.java) ||
-            clazz.isAnnotationPresent(Controller::class.java)
+            clazz.isAnnotationPresent(Controller::class.java) ||
+            clazz.isAnnotationPresent(Aspect::class.java)
     }
 
     /**
@@ -92,6 +102,12 @@ class ClassScanner(
     private fun resolveScope(clazz: Class<*>): String {
         if (clazz.isAnnotationPresent(Prototype::class.java)) {
             return BeanScopes.PROTOTYPE
+        }
+        if (clazz.isAnnotationPresent(ThreadScope::class.java)) {
+            return BeanScopes.THREAD
+        }
+        if (clazz.isAnnotationPresent(RefreshScope::class.java)) {
+            return BeanScopes.REFRESH
         }
         return BeanScopes.normalize(clazz.getAnnotation(Scope::class.java)?.value)
     }

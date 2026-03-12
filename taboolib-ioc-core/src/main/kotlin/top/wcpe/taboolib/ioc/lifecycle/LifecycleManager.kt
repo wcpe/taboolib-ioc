@@ -2,6 +2,7 @@ package top.wcpe.taboolib.ioc.lifecycle
 
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
+import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
@@ -25,7 +26,8 @@ class LifecycleManager(
     private val cycleResolver: CycleResolver,
     private val injector: Injector,
     private val cycleDetector: CycleDetector,
-    private val scopeLookup: (String) -> BeanScope? = { null }
+    private val scopeLookup: (String) -> BeanScope? = { null },
+    private val aopProxyFactory: AopProxyFactory? = null
 ) {
 
     private val initializationOrder = mutableListOf<String>()
@@ -49,11 +51,14 @@ class LifecycleManager(
         val cycleMs = (System.nanoTime() - cycleStart) / 1_000_000.0
         debug("[IoC] 循环依赖检测完成，耗时 ${"%.2f".format(cycleMs)}ms")
 
+        // 优先初始化切面 Bean，确保 AOP 代理在普通 Bean 创建前就绑定
         val eagerDefinitions = definitions.filter(BeanDefinition::isEagerSingleton)
-        debug("[IoC] 开始预初始化 ${eagerDefinitions.size} 个 eager singleton Bean")
+        val (aspectDefs, normalDefs) = eagerDefinitions.partition { it.isAspect }
+        val orderedDefs = aspectDefs + normalDefs
+        debug("[IoC] 开始预初始化 ${orderedDefs.size} 个 eager singleton Bean（其中 ${aspectDefs.size} 个切面）")
 
         val eagerStart = System.nanoTime()
-        eagerDefinitions.forEach { definition ->
+        orderedDefs.forEach { definition ->
             try {
                 val beanStart = System.nanoTime()
                 getOrCreateSingleton(definition)
@@ -65,7 +70,7 @@ class LifecycleManager(
             }
         }
         val eagerMs = (System.nanoTime() - eagerStart) / 1_000_000.0
-        debug("[IoC] 预初始化完成，共 ${eagerDefinitions.size} 个 Bean，耗时 ${"%.2f".format(eagerMs)}ms")
+        debug("[IoC] 预初始化完成，共 ${orderedDefs.size} 个 Bean，耗时 ${"%.2f".format(eagerMs)}ms")
     }
 
     fun getOrCreateSingleton(definition: BeanDefinition): Any {
@@ -137,6 +142,7 @@ class LifecycleManager(
                 cycleResolver.addSingleton(definition.name, instance)
             }
 
+            val finalInstance: Any
             try {
                 val populateStart = System.nanoTime()
                 injector.populate(instance, definition)
@@ -145,6 +151,20 @@ class LifecycleManager(
                 val postConstructStart = System.nanoTime()
                 injector.invokePostConstruct(instance, definition)
                 val postConstructMs = (System.nanoTime() - postConstructStart) / 1_000_000.0
+
+                // AOP 代理包装（切面 Bean 自身不被代理）
+                finalInstance = if (!definition.isAspect && aopProxyFactory != null) {
+                    val proxy = aopProxyFactory.wrapIfNecessary(instance, definition.type)
+                    if (proxy !== instance) {
+                        if (cacheSingleton) {
+                            cycleResolver.addSingleton(definition.name, proxy)
+                        }
+                        debug("[IoC] Bean 已包装 AOP 代理: ${definition.name}")
+                    }
+                    proxy
+                } else {
+                    instance
+                }
 
                 val totalMs = (System.nanoTime() - createStart) / 1_000_000.0
                 debug(
@@ -165,7 +185,7 @@ class LifecycleManager(
             if (cacheSingleton && initializedSingletons.add(definition.name)) {
                 initializationOrder.add(definition.name)
             }
-            return instance
+            return finalInstance
         } finally {
             stack.removeLast()
         }
@@ -174,7 +194,7 @@ class LifecycleManager(
     private fun validateScopes(definitions: List<BeanDefinition>) {
         definitions.forEach { definition ->
             val scope = BeanScopes.normalize(definition.scope)
-            if (!BeanScopes.isStandard(scope) && scopeLookup(scope) == null) {
+            if (!BeanScopes.isStandard(scope) && !BeanScopes.isBuiltin(scope) && scopeLookup(scope) == null) {
                 throw IllegalStateException("未注册的 Bean 作用域: ${definition.scope} (${definition.name})")
             }
         }

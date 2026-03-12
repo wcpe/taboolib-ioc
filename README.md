@@ -13,7 +13,7 @@
 - 容器初始化：非 lazy singleton 在 `ACTIVE` 阶段预初始化，其他作用域按需创建
 - 名称限定：`@Named`、`@Resource`
 - 生命周期：`@PostConstruct`、`@PreDestroy`
-- 作用域：默认 singleton、`@Prototype`、`@Scope` 与 `registerScope` 自定义作用域
+- 作用域：默认 singleton、`@Prototype`、`@Scope`、`@ThreadScope`、`@RefreshScope` 与 `registerScope` 自定义作用域
 - 扫描控制：`@ComponentScan`
 - 懒加载：`@Lazy`
 - 循环依赖检测：singleton Bean 的字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
@@ -21,6 +21,8 @@
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
 - 手动注册单例：`registerBean`
 - 按接口和父类类型解析 Bean
+- AOP 支持：`@Aspect`、`@Before`、`@After`、`@Around`、`@Pointcut`，基于 JDK 动态代理
+- 条件装配：`@Conditional`、`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnBean`、`@ConditionalOnMissingBean`、`@ConditionalOnProperty`
 
 ## 作用域与扫描说明
 
@@ -29,6 +31,8 @@
 - `@Lazy`：仅延迟 Bean 自身的创建，首次被解析时初始化
 - `@ComponentScan`：可按包名或基准类限制当前插件 Jar 内的组件扫描范围
 - `@Prototype`：每次解析都会创建新实例
+- `@ThreadScope`：线程级作用域，每个线程持有独立的 Bean 实例
+- `@RefreshScope`：可刷新作用域，支持运行时通过 `BeanContainer.refreshScope()` 触发重建
 - `@Scope("custom")`：配合 `BeanContainer.registerScope(...)` 使用自定义作用域
 
 说明：
@@ -36,6 +40,7 @@
 - 默认仍是 singleton 单例作用域
 - singleton Bean 支持字段/方法循环依赖的早期暴露
 - prototype / 自定义作用域 Bean 采用按需创建，不参与容器关闭时的统一 `@PreDestroy`
+- `@ThreadScope` 和 `@RefreshScope` 是内置作用域，无需手动注册
 
 ## 安装
 
@@ -250,6 +255,132 @@ class LazyService
 @Service
 @Scope("conversation")
 class ConversationService
+```
+
+### 8. AOP 切面编程
+
+使用 `@Aspect` 定义切面，通过 `@Before`、`@After`、`@Around` 拦截方法调用：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+import top.wcpe.yourplugin.ioc.bean.MethodInvocation
+
+interface OrderService {
+    fun placeOrder(orderId: String): String
+}
+
+@Service
+class OrderServiceImpl : OrderService {
+    override fun placeOrder(orderId: String): String {
+        println("下单: $orderId")
+        return "OK"
+    }
+}
+
+@Aspect
+class LoggingAspect {
+
+    @Before("execution(OrderServiceImpl.placeOrder)")
+    fun beforeOrder() {
+        println("准备下单...")
+    }
+
+    @After("execution(OrderServiceImpl.placeOrder)")
+    fun afterOrder() {
+        println("下单完成")
+    }
+
+    @Around("execution(OrderServiceImpl.placeOrder)")
+    fun aroundOrder(invocation: MethodInvocation): Any? {
+        val start = System.currentTimeMillis()
+        val result = invocation.proceed()
+        println("耗时: ${System.currentTimeMillis() - start}ms")
+        return result
+    }
+}
+```
+
+切点表达式支持：
+- `execution(类名.方法名)` — 精确匹配
+- `execution(*.方法名)` — 匹配所有类的指定方法
+- `execution(包名..*.方法名)` — 匹配包下所有类的指定方法
+- `execution(类名.*)` — 匹配类的所有方法
+
+> 注意：AOP 代理基于 JDK 动态代理，目标 Bean 必须实现接口才能被代理。`@Aspect` 类会自动注册为组件，无需额外标记 `@Component`。
+
+### 9. 条件装配
+
+根据运行时条件决定是否注册 Bean：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+// 仅当 ClassPath 中存在 Redis 客户端时注册
+@Service
+@ConditionalOnClass("redis.clients.jedis.Jedis")
+class RedisCache : Cache {
+    override fun get(key: String): String? = TODO()
+}
+
+// 当没有其他 Cache 实现时，使用内存缓存作为兜底
+@Service
+@ConditionalOnMissingBean(Cache::class)
+class InMemoryCache : Cache {
+    override fun get(key: String): String? = TODO()
+}
+
+// 当系统属性 feature.audit=true 时启用审计
+@Service
+@ConditionalOnProperty(name = "feature.audit", havingValue = "true")
+class AuditService
+
+// 自定义条件
+class ProductionCondition : Condition {
+    override fun matches(context: ConditionContext): Boolean {
+        return System.getProperty("env") == "production"
+    }
+}
+
+@Service
+@Conditional(ProductionCondition::class)
+class ProductionOnlyService
+```
+
+条件评估分两阶段：
+1. 扫描时：`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnProperty`、`@Conditional`
+2. 注册后：`@ConditionalOnBean`、`@ConditionalOnMissingBean`（依赖已注册的 Bean 信息）
+
+### 10. 线程作用域与可刷新作用域
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+import top.wcpe.yourplugin.ioc.bean.BeanContainer
+
+// 每个线程持有独立实例
+@Service
+@ThreadScope
+class RequestContext {
+    var userId: String = ""
+}
+
+// 可刷新作用域，支持运行时重建
+@Service
+@RefreshScope
+class DynamicConfig {
+    var maxRetries: Int = 3
+}
+
+// 使用
+fun example() {
+    // 刷新所有 refresh 作用域的 Bean
+    BeanContainer.refreshScope()
+
+    // 刷新指定 Bean
+    BeanContainer.refreshScope("dynamicConfig")
+
+    // 清理当前线程的 ThreadScope 缓存
+    BeanContainer.getThreadScope()?.clearCurrentThread()
+}
 ```
 
 ## 完整示例

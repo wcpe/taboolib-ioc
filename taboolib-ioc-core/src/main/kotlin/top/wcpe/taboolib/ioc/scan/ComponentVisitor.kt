@@ -6,6 +6,8 @@ import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import top.wcpe.taboolib.ioc.bean.BeanContainer
+import top.wcpe.taboolib.ioc.bean.BeanDefinition
+import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
 import taboolib.common.Inject as TabooLibInject
 
 /**
@@ -50,9 +52,15 @@ object ComponentVisitor : ClassVisitor(1) {
             debug("[IoC] 启用 @ComponentScan，扫描包: ${scanPackages.joinToString()}")
         }
 
+        val conditionContext = BeanContainer.createConditionContext()
+
+        // ── 阶段一：注册不带 @ConditionalOnBean/@ConditionalOnMissingBean 的 Bean ──
         var scanned = 0
+        var skippedByCondition = 0
         var scanTotalNs = 0L
         var registerTotalNs = 0L
+        val deferredBeanConditions = mutableListOf<Pair<Class<*>, BeanDefinition>>()
+
         for (javaClass in candidateClasses) {
             val scanStart = System.nanoTime()
             val definition = BeanContainer.getScanner().scan(javaClass)
@@ -60,15 +68,49 @@ object ComponentVisitor : ClassVisitor(1) {
             if (definition == null) continue
             if (BeanContainer.getRegistry().contains(definition.name)) continue
 
+            // 阶段一条件评估（@Conditional、@ConditionalOnClass、@ConditionalOnMissingClass、@ConditionalOnProperty）
+            if (ConditionEvaluator.shouldSkipOnScan(javaClass, conditionContext)) {
+                skippedByCondition++
+                debug("[IoC] 条件不满足，跳过组件: ${definition.name} (${javaClass.simpleName})")
+                continue
+            }
+
+            // 带 Bean 条件的延迟到阶段二
+            if (ConditionEvaluator.hasBeanCondition(javaClass)) {
+                deferredBeanConditions.add(javaClass to definition)
+                continue
+            }
+
             val regStart = System.nanoTime()
             BeanContainer.getRegistry().register(definition)
             registerTotalNs += System.nanoTime() - regStart
             scanned++
             debug("[IoC] 扫描到组件: ${definition.name} (${definition.type.simpleName})")
         }
+
+        // ── 阶段二：评估 @ConditionalOnBean / @ConditionalOnMissingBean ──
+        if (deferredBeanConditions.isNotEmpty()) {
+            debug("[IoC] 开始阶段二条件评估，共 ${deferredBeanConditions.size} 个待评估组件")
+            for ((javaClass, definition) in deferredBeanConditions) {
+                if (BeanContainer.getRegistry().contains(definition.name)) continue
+
+                if (ConditionEvaluator.shouldSkipOnBeanCondition(javaClass, conditionContext)) {
+                    skippedByCondition++
+                    debug("[IoC] Bean 条件不满足，跳过组件: ${definition.name} (${javaClass.simpleName})")
+                    continue
+                }
+
+                val regStart = System.nanoTime()
+                BeanContainer.getRegistry().register(definition)
+                registerTotalNs += System.nanoTime() - regStart
+                scanned++
+                debug("[IoC] 扫描到组件（条件装配）: ${definition.name} (${definition.type.simpleName})")
+            }
+        }
+
         val scanTotalMs = scanTotalNs / 1_000_000.0
         val registerTotalMs = registerTotalNs / 1_000_000.0
         val totalMs = (System.nanoTime() - totalStart) / 1_000_000.0
-        debug("[IoC] 组件扫描完成，共注册 $scanned 个 Bean，元数据扫描耗时 ${"%.2f".format(scanTotalMs)}ms，注册耗时 ${"%.2f".format(registerTotalMs)}ms，总耗时 ${"%.2f".format(totalMs)}ms")
+        debug("[IoC] 组件扫描完成，共注册 $scanned 个 Bean，跳过 $skippedByCondition 个（条件不满足），元数据扫描耗时 ${"%.2f".format(scanTotalMs)}ms，注册耗时 ${"%.2f".format(registerTotalMs)}ms，总耗时 ${"%.2f".format(totalMs)}ms")
     }
 }
