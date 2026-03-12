@@ -1,8 +1,13 @@
 package top.wcpe.ioc.example
 
+import top.wcpe.taboolib.ioc.annotation.ConditionContext
+import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
+import top.wcpe.taboolib.ioc.aop.AopProxyFactory
+import top.wcpe.taboolib.ioc.aop.AspectScanner
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
+import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
@@ -35,9 +40,12 @@ class IocTestContext {
     private val fieldInjector = FieldInjector(registry, ::resolveBean)
     private val injector = Injector(fieldInjector, ::resolveBean)
     private val customScopes = ConcurrentHashMap<String, BeanScope>()
+    val advisorRegistry = AdvisorRegistry()
+    private val aopProxyFactory = AopProxyFactory(advisorRegistry)
     val lifecycleManager = LifecycleManager(
         registry, cycleResolver, injector, cycleDetector,
-        scopeLookup = { name -> customScopes[name] }
+        { name -> customScopes[name] },
+        aopProxyFactory
     )
     private val scanner = ClassScanner(constructorResolver)
     private val manualBeans = ConcurrentHashMap<String, Any>()
@@ -46,6 +54,33 @@ class IocTestContext {
     fun register(clazz: Class<*>) {
         val definition = scanner.scan(clazz) ?: error("扫描失败: ${clazz.name}")
         registry.register(definition)
+    }
+
+    /**
+     * 带条件评估的注册。
+     * 返回 true 表示注册成功，false 表示条件不满足被跳过。
+     */
+    fun registerWithCondition(clazz: Class<*>): Boolean {
+        val definition = scanner.scan(clazz) ?: return false
+        val context = createConditionContext()
+        if (ConditionEvaluator.shouldSkipOnScan(clazz, context)) return false
+        if (ConditionEvaluator.shouldSkipOnBeanCondition(clazz, context)) return false
+        registry.register(definition)
+        return true
+    }
+
+    /** 创建条件评估上下文 */
+    fun createConditionContext(): ConditionContext {
+        return object : ConditionContext {
+            override fun getClassLoader(): ClassLoader =
+                Thread.currentThread().contextClassLoader ?: IocTestContext::class.java.classLoader
+
+            override fun containsBeanDefinition(name: String): Boolean =
+                registry.contains(name)
+
+            override fun getBeanNamesForType(type: Class<*>): List<String> =
+                registry.getByType(type).map { it.name }
+        }
     }
 
     /** 手动注册一个 Bean 实例 */
@@ -61,7 +96,19 @@ class IocTestContext {
 
     /** 初始化容器（预创建 eager singleton） */
     fun initialize() {
+        // 先初始化切面 Bean 并解析 Advisor
+        val aspectDefinitions = registry.getAll().filter { it.isAspect }
+        for (definition in aspectDefinitions) {
+            val aspectInstance = lifecycleManager.getOrCreateSingleton(definition)
+            val advisors = AspectScanner.scan(aspectInstance, definition.type)
+            advisorRegistry.registerAll(advisors)
+        }
         lifecycleManager.initialize()
+    }
+
+    /** 执行所有已初始化 singleton Bean 的 @PostEnable 方法 */
+    fun invokePostEnable() {
+        lifecycleManager.invokePostEnable()
     }
 
     /** 按类型获取 Bean */

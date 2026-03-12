@@ -292,6 +292,40 @@ class ExamplePluginIoCTest {
             "依赖链首尾应相同，形成环"
         )
     }
+
+    // ==================== 16. @PostEnable 生命周期回调 ====================
+
+    @Test
+    fun `PostEnable - 在 invokePostEnable 后执行且依赖已注入`() {
+        PostEnableService.enabled = false
+        PostEnableService.repoAvailable = false
+
+        val ctx = IocTestContext()
+        ctx.register(SimpleUserRepository::class.java)
+        ctx.register(PostEnableService::class.java)
+        ctx.initialize()
+
+        assertFalse(PostEnableService.enabled, "@PostEnable 不应在 initialize 时执行")
+
+        ctx.invokePostEnable()
+
+        assertTrue(PostEnableService.enabled, "@PostEnable 应在 invokePostEnable 后执行")
+        assertTrue(PostEnableService.repoAvailable, "@PostEnable 执行时依赖应已注入")
+    }
+
+    // ==================== 17. @PostEnable 执行顺序 ====================
+
+    @Test
+    fun `PostEnable执行顺序 - PostConstruct 在 PostEnable 之前执行`() {
+        LifecycleOrderService.order.clear()
+
+        val ctx = IocTestContext()
+        ctx.register(LifecycleOrderService::class.java)
+        ctx.initialize()
+        ctx.invokePostEnable()
+
+        assertEquals(listOf("PostConstruct", "PostEnable"), LifecycleOrderService.order)
+    }
 }
 
 // ==================== 测试用 Bean 定义 ====================
@@ -485,3 +519,41 @@ class CtorCycleX @Inject constructor(val y: CtorCycleY)
 
 @Component
 class CtorCycleY @Inject constructor(val x: CtorCycleX)
+
+// --- @PostEnable ---
+
+@Service
+class PostEnableService {
+    companion object {
+        var enabled = false
+        var repoAvailable = false
+    }
+
+    @Inject
+    lateinit var repo: SimpleUserRepository
+
+    @PostEnable
+    fun onEnable() {
+        enabled = true
+        repoAvailable = this::repo.isInitialized
+    }
+}
+
+// --- 生命周期顺序 ---
+
+@Service
+class LifecycleOrderService {
+    companion object {
+        val order = mutableListOf<String>()
+    }
+
+    @PostConstruct
+    fun onInit() {
+        order.add("PostConstruct")
+    }
+
+    @PostEnable
+    fun onEnable() {
+        order.add("PostEnable")
+    }
+}

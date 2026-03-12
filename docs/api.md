@@ -238,6 +238,50 @@ annotation class PostConstruct
 - 方法无参数
 - 一个类最多保留一个有效方法
 
+### `@PostEnable`
+
+插件 ENABLE 后统一执行的回调。在所有 Bean 创建完毕、object 注入完成后调用。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class PostEnable
+```
+
+要求：
+
+- 方法无参数
+- 一个类最多保留一个有效方法
+
+说明：
+
+- 执行时序：`@PostConstruct`（Bean 创建时）→ object 注入 → `@PostEnable`（ENABLE -80）→ 用户 `@Awake(LifeCycle.ENABLE)`
+- 适用于需要在所有 Bean 就绪后才能执行的初始化逻辑（如跨 Bean 协调、注册监听器等）
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Service
+import top.wcpe.yourplugin.ioc.annotation.PostEnable
+import top.wcpe.yourplugin.ioc.annotation.Inject
+
+@Service
+class GameManager {
+
+    @Inject
+    lateinit var playerService: PlayerService
+
+    @Inject
+    lateinit var worldService: WorldService
+
+    @PostEnable
+    fun onAllReady() {
+        // 此时所有 Bean 已创建完毕，可以安全地进行跨 Bean 协调
+        worldService.registerListener(playerService)
+    }
+}
+```
+
 ### `@PreDestroy`
 
 容器关闭时执行。
@@ -521,6 +565,58 @@ annotation class RefreshScope
 - 构造函数循环依赖会在 `ACTIVE` 初始化阶段抛出 `CircularDependencyException`
 - 异常会携带完整依赖链，便于快速定位问题
 
+## Kotlin 扩展方法
+
+提供更简洁的 Bean 获取方式，基于 Kotlin reified 泛型。
+
+### `bean<T>(name?)`
+
+```kotlin
+inline fun <reified T> bean(name: String? = null): T
+```
+
+行为：
+
+- 按类型获取 Bean，找不到时抛出 `IllegalStateException`
+- `name` 不为空时按名称限定
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.bean.bean
+
+val service = bean<UserService>()
+val gateway = bean<PaymentGateway>("wechatGateway")
+```
+
+### `beanOrNull<T>(name?)`
+
+```kotlin
+inline fun <reified T> beanOrNull(name: String? = null): T?
+```
+
+行为：
+
+- 按类型获取 Bean，找不到时返回 `null`
+
+### `beans<T>()`
+
+```kotlin
+inline fun <reified T> beans(): List<T>
+```
+
+行为：
+
+- 获取指定类型的所有 Bean（包括手动注册的）
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.bean.beans
+
+val gateways = beans<PaymentGateway>()
+```
+
 ## `BeanContainer`
 
 ### `getBean(type, name?)`
@@ -677,17 +773,19 @@ BeanContainer.getThreadScope()?.clearCurrentThread()
 
 ### 扫描时机
 
-- 组件类在 TabooLib `ENABLE` 阶段扫描
+- 组件类在 TabooLib `LOAD` 阶段由 `ComponentVisitor` 完成扫描
 - 扫描源来自当前插件 Jar 的类表
 - 不依赖你的业务包名是否包含 `.taboolib.`
 - 如果存在 `@ComponentScan`，只会注册命中包范围的组件
 
 ### 容器初始化时机
 
-- 容器在 `ACTIVE` 前置任务中初始化
-- 非 lazy 的 singleton Bean 会在初始化阶段预先创建
+- `ENABLE` 前置任务（优先级 -100）：初始化容器，创建 eager singleton，执行 `@PostConstruct`
+- `ENABLE` 前置任务（优先级 -90）：`ObjectInjector` 注入 Kotlin `object` 字段
+- `ENABLE` 前置任务（优先级 -80）：执行所有 singleton Bean 的 `@PostEnable` 回调
+- `DISABLE` 收尾任务（优先级 100）：关闭容器，按逆序调用 `@PreDestroy`
 - `@Lazy` singleton、`prototype` 与自定义作用域 Bean 会在首次解析时按需创建
-- Kotlin `object` 注入在容器初始化之后、用户 `@Awake(ACTIVE)` 之前执行
+- 依赖插件在 `@Awake(LifeCycle.ENABLE)` 或 `onEnable()` 中即可使用 IoC Bean
 
 ## 构造函数解析规则
 

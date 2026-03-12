@@ -98,6 +98,11 @@ class IocTestContext {
         lifecycleManager.initialize()
     }
 
+    /** 执行所有已初始化 singleton Bean 的 @PostEnable 方法 */
+    fun invokePostEnable() {
+        lifecycleManager.invokePostEnable()
+    }
+
     /** 按类型获取 Bean */
     @Suppress("UNCHECKED_CAST")
     fun <T> getBean(type: Class<T>, name: String? = null): T? {

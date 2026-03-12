@@ -37,6 +37,7 @@ class ClassScanner(
             injectFields.map { InjectParameter(it.requiredType, it.nameQualifier, it.lazy) } +
             injectMethods.flatMap { method -> method.parameters }
         val postConstruct = findPostConstruct(clazz)
+        val postEnable = findPostEnable(clazz)
         val preDestroy = findPreDestroy(clazz)
         val lazyInit = resolveLazyInit(clazz)
         val scope = resolveScope(clazz)
@@ -50,6 +51,7 @@ class ClassScanner(
             injectMethods = injectMethods,
             dependencies = dependencies,
             postConstruct = postConstruct,
+            postEnable = postEnable,
             preDestroy = preDestroy,
             lazyInit = lazyInit,
             scope = scope,
@@ -188,6 +190,13 @@ class ClassScanner(
      */
     private fun findPostConstruct(clazz: Class<*>): java.lang.reflect.Method? {
         return clazz.declaredMethods.firstOrNull { it.isAnnotationPresent(PostConstruct::class.java) }
+    }
+
+    /**
+     * 查找 @PostEnable 方法
+     */
+    private fun findPostEnable(clazz: Class<*>): java.lang.reflect.Method? {
+        return clazz.declaredMethods.firstOrNull { it.isAnnotationPresent(PostEnable::class.java) }
     }
 
     /**

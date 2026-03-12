@@ -178,6 +178,11 @@ object BeanContainer {
         debug("[IoC] 切面解析完成，共 ${advisorRegistry.getAll().size} 个通知器")
     }
 
+    internal fun invokePostEnable() {
+        if (!initialized) return
+        lifecycleManager.invokePostEnable()
+    }
+
     internal fun shutdown() {
         if (!initialized) return
 

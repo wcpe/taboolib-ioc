@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0-SNAPSHOT] - 2026-03-12
+
+### 新增
+
+- `@PostEnable` 生命周期注解：标记在 Bean 方法上，在插件 ENABLE 阶段、所有 Bean 创建完毕且 object 注入完成后统一执行
+  - 执行时序：`@PostConstruct`（Bean 创建时）→ object 注入 → `@PostEnable`（ENABLE -80）→ 用户 `@Awake(LifeCycle.ENABLE)`
+  - 适用于需要在所有 Bean 就绪后才能执行的初始化逻辑
+- Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`，提供更简洁的 Bean 获取方式
+- 9 个新增单元测试覆盖 `@PostEnable`（5）和扩展方法（4）
+
 ## [1.0.0-SNAPSHOT] - 2026-03-11
 
 ### 新增
@@ -46,15 +56,10 @@
 
 ## 版本规划
 
-### [1.0.0] - 计划中
+### [1.1.0] - 计划中
 - 正式版本发布
 - 完善文档
 - 性能优化
-
-### [1.1.0] - 计划中
-- AOP 支持
-- 条件装配 `@Conditional` 系列
-- 更多作用域支持
 
 ### [1.2.0] - 计划中
 - `@Configuration` + `@Bean` Java Config 支持

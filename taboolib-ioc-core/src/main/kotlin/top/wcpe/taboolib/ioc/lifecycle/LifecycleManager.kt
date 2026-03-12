@@ -88,6 +88,30 @@ class LifecycleManager(
     }
 
     /**
+     * 执行所有已初始化 singleton Bean 的 @PostEnable 方法
+     */
+    fun invokePostEnable() {
+        debug("[IoC] 开始执行 @PostEnable 回调，共 ${initializationOrder.size} 个 singleton")
+        val start = System.nanoTime()
+
+        for (name in initializationOrder) {
+            val definition = registry.getByName(name) ?: continue
+            val postEnable = definition.postEnable ?: continue
+            try {
+                val invokeStart = System.nanoTime()
+                postEnable.invoke(cycleResolver.getSingleton(name))
+                val invokeMs = (System.nanoTime() - invokeStart) / 1_000_000.0
+                debug("[IoC] @PostEnable 执行完成: $name，耗时 ${"%.2f".format(invokeMs)}ms")
+            } catch (e: Exception) {
+                warning("[IoC] @PostEnable 执行失败: $name - ${e.message}")
+            }
+        }
+
+        val totalMs = (System.nanoTime() - start) / 1_000_000.0
+        debug("[IoC] @PostEnable 回调执行完成，总耗时 ${"%.2f".format(totalMs)}ms")
+    }
+
+    /**
      * 重置内部状态，不触发生命周期回调
      */
     fun resetState() {

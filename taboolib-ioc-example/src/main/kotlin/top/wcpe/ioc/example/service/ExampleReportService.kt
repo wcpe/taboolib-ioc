@@ -18,6 +18,7 @@ class ExampleReportService @Inject constructor(
     private lateinit var fallbackGateway: ExampleGateway
     private lateinit var textComponent: ExampleTextComponent
     private var postConstructInvoked = false
+    private var postEnableInvoked = false
 
     @Resource(name = "alipayGateway")
     fun bindFallbackGateway(gateway: ExampleGateway) {
@@ -35,6 +36,12 @@ class ExampleReportService @Inject constructor(
         info("ExampleReportService 初始化完成")
     }
 
+    @PostEnable
+    fun onEnable() {
+        postEnableInvoked = true
+        info("ExampleReportService PostEnable 回调")
+    }
+
     @PreDestroy
     fun onDestroy() {
         info("ExampleReportService 销毁前回调")
@@ -46,7 +53,8 @@ class ExampleReportService @Inject constructor(
             textComponent.line("fieldNamedInjection", auditGateway.channel()),
             textComponent.line("methodResourceInjection", fallbackGateway.channel()),
             textComponent.line("methodInject", textComponent.javaClass.simpleName),
-            textComponent.line("postConstruct", postConstructInvoked)
+            textComponent.line("postConstruct", postConstructInvoked),
+            textComponent.line("postEnable", postEnableInvoked)
         )
     }
 

@@ -9,6 +9,9 @@ import top.wcpe.ioc.example.support.ExampleObjectBridge
 import top.wcpe.taboolib.ioc.annotation.Controller
 import top.wcpe.taboolib.ioc.annotation.Inject
 import top.wcpe.taboolib.ioc.bean.BeanContainer
+import top.wcpe.taboolib.ioc.bean.bean
+import top.wcpe.taboolib.ioc.bean.beanOrNull
+import top.wcpe.taboolib.ioc.bean.beans
 
 @Controller
 class ExampleFeatureController @Inject constructor(
@@ -17,14 +20,16 @@ class ExampleFeatureController @Inject constructor(
 ) {
 
     fun runAllChecks(): List<String> {
+        // 传统 API 风格
         val serviceByType = BeanContainer.getBean(ExampleReportService::class.java)
         val gatewayByName = BeanContainer.getBean(ExampleGateway::class.java, "wechatGateway")
-        val allGateways = BeanContainer.getBeansOfType(ExampleGateway::class.java)
+
+        // Kotlin 扩展方法风格
+        val allGateways = beans<ExampleGateway>()
             .map { it.channel() }
             .sorted()
             .joinToString(",")
-        val manualToken = BeanContainer
-            .getBean(ExampleManualToken::class.java, "exampleManualToken")
+        val manualToken = beanOrNull<ExampleManualToken>("exampleManualToken")
             ?.value ?: "missing"
         val beanNames = BeanContainer.getBeanNames()
             .filter { it.startsWith("example") || it.endsWith("Gateway") }

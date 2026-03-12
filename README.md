@@ -2,7 +2,7 @@
 
 为 TabooLib Bukkit 插件场景提供的轻量 IoC 容器。
 
-[![版本](https://img.shields.io/badge/版本-1.0.0--SNAPSHOT-blue)](CHANGELOG.md)
+[![版本](https://img.shields.io/badge/版本-1.1.0--SNAPSHOT-blue)](CHANGELOG.md)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-orange)](https://kotlinlang.org)
 [![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
 
@@ -12,7 +12,7 @@
 - 依赖注入：构造函数、字段、方法注入
 - 容器初始化：非 lazy singleton 在 `ACTIVE` 阶段预初始化，其他作用域按需创建
 - 名称限定：`@Named`、`@Resource`
-- 生命周期：`@PostConstruct`、`@PreDestroy`
+- 生命周期：`@PostConstruct`、`@PostEnable`、`@PreDestroy`
 - 作用域：默认 singleton、`@Prototype`、`@Scope`、`@ThreadScope`、`@RefreshScope` 与 `registerScope` 自定义作用域
 - 扫描控制：`@ComponentScan`
 - 懒加载：`@Lazy`
@@ -23,6 +23,7 @@
 - 按接口和父类类型解析 Bean
 - AOP 支持：`@Aspect`、`@Before`、`@After`、`@Around`、`@Pointcut`，基于 JDK 动态代理
 - 条件装配：`@Conditional`、`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnBean`、`@ConditionalOnMissingBean`、`@ConditionalOnProperty`
+- Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
 
 ## 作用域与扫描说明
 
@@ -172,6 +173,7 @@ class PaymentService {
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Service
 import top.wcpe.yourplugin.ioc.annotation.PostConstruct
+import top.wcpe.yourplugin.ioc.annotation.PostEnable
 import top.wcpe.yourplugin.ioc.annotation.PreDestroy
 
 @Service
@@ -180,6 +182,11 @@ class LifecycleService {
     @PostConstruct
     fun onInit() {
         println("Bean 初始化完成，依赖注入已执行")
+    }
+
+    @PostEnable
+    fun onEnable() {
+        println("所有 Bean 已就绪，插件 ENABLE 阶段统一执行")
     }
 
     @PreDestroy
@@ -211,6 +218,28 @@ val names = BeanContainer.getBeanNames()
 
 // 手动注册 Bean
 BeanContainer.registerBean("manualValue", MyCustomObject("data"))
+```
+
+#### Kotlin 扩展方法
+
+更简洁的 Bean 获取方式：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.bean.bean
+import top.wcpe.yourplugin.ioc.bean.beanOrNull
+import top.wcpe.yourplugin.ioc.bean.beans
+
+// 按类型获取，找不到抛异常
+val userService = bean<UserService>()
+
+// 按名称获取
+val gateway = bean<PaymentGateway>("wechatGateway")
+
+// 按类型获取，找不到返回 null
+val optional = beanOrNull<UserService>()
+
+// 获取某类型的所有 Bean
+val allGateways = beans<PaymentGateway>()
 ```
 
 ### 6. Kotlin object 注入
@@ -488,9 +517,10 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 - `@Named` 名称限定注入
 - 字段循环依赖示例
 - 构造函数循环依赖检测示例
-- `@PostConstruct` / `@PreDestroy`
+- `@PostConstruct` / `@PostEnable` / `@PreDestroy`
 - Kotlin `object` 自动注入
 - `BeanContainer` 全部公开查询/注册方法
+- Kotlin 扩展方法 `bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
 - 接口类型 `getBeansOfType` 聚合查询
 
 核心入口见：
@@ -509,6 +539,7 @@ fieldNamedInjection=wechat
 methodResourceInjection=alipay
 methodInject=ExampleTextComponent
 postConstruct=true
+postEnable=true
 getBeanByType=ExampleReportService
 getBeanByName=wechat
 getBeansOfType=alipay,wechat
@@ -573,7 +604,7 @@ val service = ctx.getBean(UserService::class.java)  // 获取 Bean
 
 ### 测试用例示例
 
-示例插件包含 15 个测试用例，覆盖 IoC 容器的全部核心能力：
+示例插件包含 17 个测试用例，覆盖 IoC 容器的全部核心能力：
 
 | # | 测试场景 | 说明 |
 |---|---------|------|
@@ -592,6 +623,8 @@ val service = ctx.getBean(UserService::class.java)  // 获取 Bean
 | 13 | `getBeansOfType` 聚合查询 | 获取某接口的所有实现 |
 | 14 | 字段循环依赖解析 | singleton Bean 的字段循环依赖可正常解析 |
 | 15 | 构造函数循环依赖拒绝 | 构造函数循环依赖抛出异常并包含依赖链 |
+| 16 | `@PostEnable` 回调 | 在 `invokePostEnable` 后执行且依赖已注入 |
+| 17 | `@PostEnable` 执行顺序 | `@PostConstruct` 在 `@PostEnable` 之前执行 |
 
 #### 示例：构造函数注入测试
 

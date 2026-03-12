@@ -2,7 +2,6 @@ package top.wcpe.taboolib.ioc.bean
 
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
-import top.wcpe.taboolib.ioc.annotation.Lazy
 
 /**
  * Bean 元数据定义。
@@ -15,6 +14,7 @@ import top.wcpe.taboolib.ioc.annotation.Lazy
  * @property injectFields 需要注入的字段列表
  * @property injectMethods 需要注入的方法列表
  * @property postConstruct 初始化后回调方法
+ * @property postEnable 插件 ENABLE 后统一执行的回调方法
  * @property preDestroy 销毁前回调方法
  * @property lazyInit 是否延迟初始化
  * @property scope Bean 作用域
@@ -26,6 +26,7 @@ class BeanDefinition(
     val injectFields: List<InjectField>,
     val injectMethods: List<InjectMethod>,
     val postConstruct: Method?,
+    val postEnable: Method?,
     val preDestroy: Method?,
     val constructorParameters: List<InjectParameter>,
     val dependencies: List<InjectParameter>,
@@ -36,65 +37,13 @@ class BeanDefinition(
     init {
         constructor.isAccessible = true
         postConstruct?.isAccessible = true
+        postEnable?.isAccessible = true
         preDestroy?.isAccessible = true
     }
-
-    constructor(
-        name: String,
-        type: Class<*>,
-        constructor: Constructor<*>,
-        injectFields: List<InjectField>,
-        injectMethods: List<InjectMethod>,
-        postConstruct: Method?,
-        preDestroy: Method?,
-        lazyInit: Boolean = false,
-        scope: String = BeanScopes.SINGLETON
-    ) : this(
-        name = name,
-        type = type,
-        constructor = constructor,
-        injectFields = injectFields,
-        injectMethods = injectMethods,
-        postConstruct = postConstruct,
-        preDestroy = preDestroy,
-        constructorParameters = resolveConstructorParameters(constructor),
-        dependencies = resolveDependencies(constructor, injectFields, injectMethods),
-        lazyInit = lazyInit,
-        scope = BeanScopes.normalize(scope)
-    )
 
     fun isSingletonScope(): Boolean = BeanScopes.normalize(scope) == BeanScopes.SINGLETON
 
     fun isPrototypeScope(): Boolean = BeanScopes.normalize(scope) == BeanScopes.PROTOTYPE
 
     fun isEagerSingleton(): Boolean = isSingletonScope() && !lazyInit
-
-    companion object {
-
-        private fun resolveConstructorParameters(constructor: Constructor<*>): List<InjectParameter> {
-            if (constructor.parameterCount == 0) {
-                return emptyList()
-            }
-
-            return constructor.parameterTypes.mapIndexed { index, type ->
-                val lazy = constructor.parameters.getOrNull(index)
-                    ?.getAnnotation(Lazy::class.java)?.value == true
-                InjectParameter(
-                    type = type,
-                    nameQualifier = ConstructorQualifierResolver.resolve(constructor, index),
-                    lazy = lazy
-                )
-            }
-        }
-
-        private fun resolveDependencies(
-            constructor: Constructor<*>,
-            injectFields: List<InjectField>,
-            injectMethods: List<InjectMethod>
-        ): List<InjectParameter> {
-            return resolveConstructorParameters(constructor) +
-                injectFields.map { InjectParameter(it.requiredType, it.nameQualifier, it.lazy) } +
-                injectMethods.flatMap { it.parameters }
-        }
-    }
 }
