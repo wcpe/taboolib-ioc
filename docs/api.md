@@ -204,6 +204,130 @@ annotation class ComponentScan(
 - 未声明时，默认扫描当前插件 Jar 内的全部组件类
 - 声明后，仅扫描指定包及其子包
 - 未显式指定包时，默认使用声明该注解的类所在包
+
+### `@Configuration`
+
+标记一个类为配置类，其中的 `@Bean` 方法会被扫描并注册为 Bean 定义。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Configuration
+```
+
+说明：
+
+- 配置类本身也会被注册为 singleton Bean
+- 配置类中的 `@Bean` 方法在容器初始化时被调用，返回值作为 Bean 实例
+- 可配合 `@PropertySource` 加载配置文件
+
+### `@Bean`
+
+在 `@Configuration` 类中声明一个 Bean。
+
+```kotlin
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Bean(val value: String = "")
+```
+
+说明：
+
+- `value` 为空时，Bean 名称默认为方法名
+- 方法参数会自动从容器中解析注入
+- 参数支持 `@Named` 限定符和 `@Lazy` 延迟注入
+- 返回类型上的 `@Inject`/`@Value` 字段会被自动注入
+- 返回类型上的 `@PostConstruct`/`@PostEnable`/`@PreDestroy` 会被自动调用
+- 如果返回类型是接口，实际实现类上的注入点和生命周期回调也会在运行时被发现
+- 可配合 `@Primary`、`@Order`、`@Scope`、`@Lazy`、条件注解使用
+
+示例：
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+@Configuration
+class AppConfig {
+
+    @Primary
+    @Bean
+    fun mainDataSource(): DataSource = MysqlDataSource("jdbc:mysql://localhost/db")
+
+    @Bean("backupDataSource")
+    fun backupDataSource(): DataSource = H2DataSource()
+
+    // 参数自动注入，支持 @Named 限定
+    @Bean
+    fun userRepository(@Named("mainDataSource") ds: DataSource): UserRepository =
+        UserRepository(ds)
+
+    // 方法级别条件注解
+    @ConditionalOnProperty(name = "cache.enabled", havingValue = "true")
+    @Bean
+    fun cacheService(): CacheService = RedisCacheService()
+}
+```
+
+### `@PropertySource`
+
+指定配置文件来源，标注在 `@Configuration` 类上。
+
+```kotlin
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class PropertySource(vararg val value: String)
+```
+
+说明：
+
+- `value`：classpath 相对路径列表
+- 支持 `.properties` 格式和简单的 `.yml` 格式（仅扁平 `key: value`）
+- 加载的属性可通过 `@Value` 注入
+- 属性查找优先级：已加载配置文件 > 系统属性
+
+示例：
+
+```kotlin
+@PropertySource("database.properties", "app.yml")
+@Configuration
+class AppConfig {
+    @Bean
+    fun settings(): AppSettings = AppSettings()
+}
+
+class AppSettings {
+    @Value("\${db.url:jdbc:h2:mem:test}")
+    var dbUrl: String = ""
+}
+```
+
+### `@DependsOn`
+
+声明当前 Bean 依赖于指定的 Bean，确保它们在当前 Bean 之前初始化。
+
+```kotlin
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class DependsOn(vararg val value: String)
+```
+
+说明：
+
+- `value`：依赖的 Bean 名称列表
+- 容器会按拓扑排序确保依赖的 Bean 先初始化
+- 可用于类级别和 `@Bean` 方法级别
+
+示例：
+
+```kotlin
+@DependsOn("databaseConnection")
+@Component
+class UserDao {
+    @Inject
+    lateinit var db: DatabaseConnection
+}
+```
+
 ### `@Inject`
 
 依赖注入注解。
@@ -211,7 +335,7 @@ annotation class ComponentScan(
 ```kotlin
 @Target(AnnotationTarget.CONSTRUCTOR, AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
-annotation class Inject
+annotation class Inject(val required: Boolean = true)
 ```
 
 支持：
@@ -220,6 +344,11 @@ annotation class Inject
 - 字段注入
 - 方法注入
 - Kotlin `lateinit var` 属性注入
+
+说明：
+
+- `required = true`（默认）：注入失败时抛出 `IllegalStateException`
+- `required = false`：注入失败时字段保持 null，输出 warning 日志
 
 示例：
 
@@ -241,6 +370,14 @@ class UserService @Inject constructor(
     fun bindLogger(logger: LoggerService) {
         this.logger = logger
     }
+}
+```
+
+```kotlin
+@Component
+class PluginFeature {
+    @Inject(required = false)
+    var analytics: AnalyticsService? = null
 }
 ```
 
@@ -304,7 +441,7 @@ annotation class PostConstruct
 要求：
 
 - 方法无参数
-- 一个类最多保留一个有效方法
+- 一个类可以有多个标注了该注解的方法，所有方法都会被调用
 
 ### `@PostEnable`
 
@@ -319,7 +456,7 @@ annotation class PostEnable
 要求：
 
 - 方法无参数
-- 一个类最多保留一个有效方法
+- 一个类可以有多个标注了该注解的方法，所有方法都会被调用
 
 说明：
 
@@ -363,7 +500,7 @@ annotation class PreDestroy
 要求：
 
 - 方法无参数
-- 一个类最多保留一个有效方法
+- 一个类可以有多个标注了该注解的方法，所有方法都会被调用
 
 ### `@Aspect`
 
@@ -502,43 +639,47 @@ class MethodInvocation(
 通用条件注解，指定一个或多个 `Condition` 实现类。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Conditional(vararg val value: KClass<out Condition>)
 ```
 
 - 多个 Condition 之间为 AND 关系，全部满足才注册
 - `Condition` 接口需实现 `fun matches(context: ConditionContext): Boolean`
+- 可用于类级别和 `@Bean` 方法级别
 
 ### `@ConditionalOnClass`
 
 当指定的类存在于 ClassPath 中时注册。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnClass(vararg val value: String)
 ```
 
 - `value`：类的全限定名
 - 多个类名之间为 AND 关系
+- 可用于类级别和 `@Bean` 方法级别
 
 ### `@ConditionalOnMissingClass`
 
 当指定的类不存在于 ClassPath 中时注册。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnMissingClass(vararg val value: String)
 ```
+
+- 可用于类级别和 `@Bean` 方法级别
 
 ### `@ConditionalOnBean`
 
 当容器中存在指定类型或名称的 Bean 时注册。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnBean(
     vararg val value: KClass<*> = [],
@@ -548,13 +689,14 @@ annotation class ConditionalOnBean(
 
 - `value` 和 `name` 之间为 AND 关系
 - 在阶段二（所有非条件 Bean 注册后）评估
+- 可用于类级别和 `@Bean` 方法级别
 
 ### `@ConditionalOnMissingBean`
 
 当容器中不存在指定类型或名称的 Bean 时注册。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnMissingBean(
     vararg val value: KClass<*> = [],
@@ -562,12 +704,14 @@ annotation class ConditionalOnMissingBean(
 )
 ```
 
+- 可用于类级别和 `@Bean` 方法级别
+
 ### `@ConditionalOnProperty`
 
 当系统属性匹配指定值时注册。
 
 ```kotlin
-@Target(AnnotationTarget.CLASS)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ConditionalOnProperty(
     val name: String,
@@ -578,6 +722,7 @@ annotation class ConditionalOnProperty(
 
 - `havingValue` 为空时，仅检查属性是否存在
 - `matchIfMissing`：属性不存在时是否视为匹配
+- 可用于类级别和 `@Bean` 方法级别
 
 ### `Condition` 接口
 
@@ -683,6 +828,36 @@ inline fun <reified T> beans(): List<T>
 import top.wcpe.yourplugin.ioc.bean.beans
 
 val gateways = beans<PaymentGateway>()
+```
+
+## `BeanPostProcessor`
+
+Bean 后处理器扩展点，允许在 Bean 初始化前后对实例进行自定义处理。
+
+```kotlin
+interface BeanPostProcessor {
+    fun postProcessBeforeInitialization(bean: Any, beanName: String): Any = bean
+    fun postProcessAfterInitialization(bean: Any, beanName: String): Any = bean
+}
+```
+
+说明：
+
+- 实现此接口的 Bean 会被自动发现并注册
+- `postProcessBeforeInitialization`：在 `@PostConstruct` 之前调用
+- `postProcessAfterInitialization`：在 `@PostConstruct` 之后、AOP 代理之前调用
+- 可以返回原始实例或包装后的代理
+
+示例：
+
+```kotlin
+@Component
+class LoggingPostProcessor : BeanPostProcessor {
+    override fun postProcessAfterInitialization(bean: Any, beanName: String): Any {
+        println("Bean 初始化完成: $beanName (${bean.javaClass.simpleName})")
+        return bean
+    }
+}
 ```
 
 ## `BeanContainer`
@@ -854,6 +1029,9 @@ BeanContainer.getThreadScope()?.clearCurrentThread()
 - `DISABLE` 收尾任务（优先级 100）：关闭容器，按逆序调用 `@PreDestroy`
 - `@Lazy` singleton、`prototype` 与自定义作用域 Bean 会在首次解析时按需创建
 - 依赖插件在 `@Awake(LifeCycle.ENABLE)` 或 `onEnable()` 中即可使用 IoC Bean
+- `@PropertySource` 配置文件在 LOAD 阶段扫描 `@Configuration` 类时加载
+- `BeanPostProcessor` 在容器初始化时优先创建并注册
+- `@DependsOn` 在初始化 eager singleton 时按拓扑排序处理
 
 ## 构造函数解析规则
 
@@ -925,6 +1103,7 @@ object PluginState {
 
 - AOP 基于 JDK 动态代理实现，目标 Bean 必须实现接口才能被代理
 - 没有实现接口的 Bean 即使有匹配的 Advisor 也不会被代理
+- 没有实现接口的 Bean 如果有匹配的 Advisor，会输出 warning 日志提示
 - 切面 Bean 在容器初始化时优先创建，确保普通 Bean 创建时 AOP 代理已就绪
 - 切面 Bean 自身不会被 AOP 代理
 - `@After` 通知在目标方法抛出异常时仍会执行

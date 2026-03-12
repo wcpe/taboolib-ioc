@@ -27,6 +27,14 @@
 - AOP 支持：`@Aspect`、`@Before`、`@After`、`@Around`、`@Pointcut`，基于 JDK 动态代理
 - 条件装配：`@Conditional`、`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnBean`、`@ConditionalOnMissingBean`、`@ConditionalOnProperty`
 - Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
+- Java Config：`@Configuration` + `@Bean` 方法声明 Bean，支持 `@Named` 参数限定、`@Lazy` 参数、`@Primary`、`@Order`、`@Scope`
+- `@Bean` 产物增强：支持 `@PostConstruct`/`@PostEnable`/`@PreDestroy` 生命周期回调、`@Value`/`@Inject` 字段注入
+- `@Bean` 方法级别条件注解：`@ConditionalOnClass`/`@ConditionalOnProperty` 等可直接标注在 `@Bean` 方法上
+- `@PropertySource`：在 `@Configuration` 类上指定配置文件，支持 `.properties` 和简单 `.yml` 格式
+- `@DependsOn`：显式声明 Bean 初始化顺序依赖
+- `@Inject(required = false)`：可选注入，依赖不存在时不抛异常
+- `BeanPostProcessor`：Bean 初始化前后的扩展回调
+- 多生命周期方法：同一个类可以有多个 `@PostConstruct`/`@PostEnable`/`@PreDestroy` 方法
 
 ## 作用域与扫描说明
 
@@ -415,6 +423,109 @@ fun example() {
 }
 ```
 
+### 11. @Configuration + @Bean
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+interface DataSource {
+    fun url(): String
+}
+
+class MysqlDataSource(private val jdbcUrl: String) : DataSource {
+    override fun url(): String = jdbcUrl
+}
+
+@Configuration
+class DatabaseConfig {
+
+    @Bean
+    fun dataSource(@Named("jdbcUrl") url: String): DataSource = MysqlDataSource(url)
+
+    @Primary
+    @Bean("mainCache")
+    fun mainCache(): CacheService = RedisCacheService()
+
+    @ConditionalOnProperty(name = "cache.local.enabled", havingValue = "true")
+    @Bean
+    fun localCache(): CacheService = LocalCacheService()
+}
+```
+
+### 12. @PropertySource 配置文件
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+// app.properties:
+// app.name=MyPlugin
+// app.version=2.0
+
+@PropertySource("app.properties")
+@Configuration
+class AppConfig {
+    @Bean
+    fun appInfo(): AppInfo = AppInfo()
+}
+
+class AppInfo {
+    @Value("\${app.name:DefaultApp}")
+    var name: String = ""
+
+    @Value("\${app.version:1.0}")
+    var version: String = ""
+}
+```
+
+### 13. BeanPostProcessor 扩展
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Component
+import top.wcpe.yourplugin.ioc.bean.BeanPostProcessor
+
+@Component
+class AuditPostProcessor : BeanPostProcessor {
+    override fun postProcessAfterInitialization(bean: Any, beanName: String): Any {
+        println("Bean 初始化完成: $beanName")
+        return bean
+    }
+}
+```
+
+### 14. @DependsOn 初始化顺序
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+@Component
+class DatabaseConnection {
+    @PostConstruct
+    fun connect() { println("数据库已连接") }
+}
+
+@DependsOn("databaseConnection")
+@Component
+class UserDao {
+    @Inject
+    lateinit var db: DatabaseConnection
+}
+```
+
+### 15. @Inject(required = false) 可选注入
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.*
+
+@Component
+class PluginFeature {
+    // 如果 AnalyticsService 没有注册，字段保持 null，不抛异常
+    @Inject(required = false)
+    var analytics: AnalyticsService? = null
+
+    fun isAnalyticsEnabled(): Boolean = analytics != null
+}
+```
+
 ## 完整示例
 
 以下是一个完整的插件示例，展示所有核心功能：
@@ -525,6 +636,12 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 - `BeanContainer` 全部公开查询/注册方法
 - Kotlin 扩展方法 `bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
 - 接口类型 `getBeansOfType` 聚合查询
+- `@Configuration` + `@Bean` Java Config
+- `@PropertySource` 配置文件加载
+- `@DependsOn` 初始化顺序
+- `@Inject(required = false)` 可选注入
+- `BeanPostProcessor` 扩展点
+- `@Bean` 方法级别条件注解
 
 核心入口见：
 
@@ -607,7 +724,7 @@ val service = ctx.getBean(UserService::class.java)  // 获取 Bean
 
 ### 测试用例示例
 
-示例插件包含 17 个测试用例，覆盖 IoC 容器的全部核心能力：
+示例插件包含 60+ 个测试用例，覆盖 IoC 容器的全部核心能力：
 
 | # | 测试场景 | 说明 |
 |---|---------|------|
@@ -710,4 +827,6 @@ fun `字段循环依赖 - singleton Bean 的字段循环依赖可正常解析`()
 ./gradlew :taboolib-ioc-example:test
 ```
 
+## 架构文档
 
+详细的容器架构、启动流程和内部机制说明请参阅 [架构文档](docs/architecture.md)。
