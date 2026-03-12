@@ -1,16 +1,17 @@
-package top.wcpe.taboolib.ioc.scan
+package top.wcpe.taboolib.ioc.test
 
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import top.wcpe.taboolib.ioc.IocTestContext
 import top.wcpe.taboolib.ioc.annotation.*
 
+/**
+ * @Configuration + @Bean 功能测试（MockBukkit v1.13 / Java 8 环境）
+ */
 class ConfigurationBeanTest {
 
-    // ── 基本 @Configuration + @Bean 测试 ──
-
     @Test
-    fun `bean method should produce a bean`() {
+    fun `basic bean method should produce a bean`() {
         val ctx = IocTestContext()
         ctx.register(MessageServiceImpl::class.java)
         ctx.register(AppConfig::class.java)
@@ -42,19 +43,6 @@ class ConfigurationBeanTest {
     }
 
     @Test
-    fun `multiple bean methods should all be registered`() {
-        val ctx = IocTestContext()
-        ctx.register(MessageServiceImpl::class.java)
-        ctx.register(AppConfig::class.java)
-        ctx.initialize()
-
-        assertNotNull(ctx.getBean(Greeter::class.java))
-        assertNotNull(ctx.getBean(Calculator::class.java))
-    }
-
-    // ── @Bean 方法带参数（依赖注入）测试 ──
-
-    @Test
     fun `bean method with parameter should resolve dependency`() {
         val ctx = IocTestContext()
         ctx.register(MessageServiceImpl::class.java)
@@ -65,8 +53,6 @@ class ConfigurationBeanTest {
         assertNotNull(formatter)
         assertEquals("[hello world]", formatter!!.format("hello world"))
     }
-
-    // ── 配置类本身也是 Bean ──
 
     @Test
     fun `configuration class itself should be a bean`() {
@@ -79,8 +65,6 @@ class ConfigurationBeanTest {
         assertNotNull(config)
     }
 
-    // ── @Primary 在 @Bean 上 ──
-
     @Test
     fun `primary bean method should be preferred`() {
         val ctx = IocTestContext()
@@ -92,34 +76,21 @@ class ConfigurationBeanTest {
         assertEquals("primary", service!!.name())
     }
 
-    // ── ConfigurationScanner 单元测试 ──
-
     @Test
-    fun `scanner should return empty for non-configuration class`() {
-        val result = ConfigurationScanner.scan(MessageServiceImpl::class.java, "messageServiceImpl")
-        assertTrue(result.isEmpty())
-    }
+    fun `bean produced by factory should be injectable into other beans`() {
+        val ctx = IocTestContext()
+        ctx.register(MessageServiceImpl::class.java)
+        ctx.register(AppConfig::class.java)
+        ctx.register(GreeterConsumer::class.java)
+        ctx.initialize()
 
-    @Test
-    fun `scanner should parse bean definitions from configuration class`() {
-        val result = ConfigurationScanner.scan(AppConfig::class.java, "appConfig")
-        assertTrue(result.isNotEmpty())
-        assertTrue(result.any { it.name == "myGreeter" })
-        assertTrue(result.any { it.name == "calculator" })
-    }
-
-    @Test
-    fun `factory bean definition should have correct factory info`() {
-        val result = ConfigurationScanner.scan(AppConfig::class.java, "appConfig")
-        val greeterDef = result.first { it.name == "myGreeter" }
-        assertTrue(greeterDef.isFactoryBean())
-        assertEquals("appConfig", greeterDef.factoryBeanName)
-        assertEquals("myGreeter", greeterDef.factoryMethod?.name)
-        assertNull(greeterDef.constructor)
+        val consumer = ctx.getBean(GreeterConsumer::class.java)
+        assertNotNull(consumer)
+        assertEquals("hello", consumer!!.greeter.greet())
     }
 }
 
-// ── 测试用组件 ──
+// ── 测试夹具 ──
 
 interface Greeter {
     fun greet(): String
@@ -158,11 +129,11 @@ interface SimpleService {
     fun name(): String
 }
 
-class PrimaryService : SimpleService {
+class PrimaryServiceImpl : SimpleService {
     override fun name(): String = "primary"
 }
 
-class SecondaryService : SimpleService {
+class SecondaryServiceImpl : SimpleService {
     override fun name(): String = "secondary"
 }
 
@@ -184,8 +155,14 @@ class PrimaryBeanConfig {
 
     @Primary
     @Bean
-    fun primaryService(): SimpleService = PrimaryService()
+    fun primaryService(): SimpleService = PrimaryServiceImpl()
 
     @Bean
-    fun secondaryService(): SimpleService = SecondaryService()
+    fun secondaryService(): SimpleService = SecondaryServiceImpl()
+}
+
+@Component
+class GreeterConsumer {
+    @Inject
+    lateinit var greeter: Greeter
 }
