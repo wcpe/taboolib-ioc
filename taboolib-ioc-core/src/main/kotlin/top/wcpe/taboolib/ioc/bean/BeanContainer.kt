@@ -11,6 +11,7 @@ import top.wcpe.taboolib.ioc.cycle.CycleResolver
 import top.wcpe.taboolib.ioc.inject.ConstructorResolver
 import top.wcpe.taboolib.ioc.inject.FieldInjector
 import top.wcpe.taboolib.ioc.inject.Injector
+import top.wcpe.taboolib.ioc.inject.ValueResolver
 import top.wcpe.taboolib.ioc.lifecycle.EventBus
 import top.wcpe.taboolib.ioc.lifecycle.LifecycleManager
 import top.wcpe.taboolib.ioc.scan.ClassScanner
@@ -215,6 +216,7 @@ object BeanContainer {
         registry.clear()
         manualBeansByName.clear()
         lifecycleManager.eventBus.clear()
+        ValueResolver.clearProperties()
         initialized = false
 
         val ms = (System.nanoTime() - start) / 1_000_000.0
@@ -245,6 +247,7 @@ object BeanContainer {
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
+        ValueResolver.clearProperties()
         initialized = false
         initializing = false
     }

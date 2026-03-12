@@ -137,12 +137,7 @@ class FieldInjector(
             return beanProvider(type, nameQualifier)
         }
 
-        // 按类型查找
-        val definitions = registry.getByType(type)
-        return when {
-            definitions.isEmpty() -> beanProvider(type, null)
-            definitions.size == 1 -> beanProvider(type, null)
-            else -> beanProvider(type, definitions.first().name)
-        }
+        // 按类型查找 — 统一委托给 beanProvider，由 BeanResolver 通过 @Primary 逻辑选择
+        return beanProvider(type, null)
     }
 }

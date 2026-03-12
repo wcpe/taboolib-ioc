@@ -2,6 +2,8 @@ package top.wcpe.taboolib.ioc.lifecycle
 
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
+import top.wcpe.taboolib.ioc.annotation.PostEnable
+import top.wcpe.taboolib.ioc.annotation.PreDestroy
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.bean.BeanCreatedEvent
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
@@ -110,9 +112,11 @@ class LifecycleManager(
 
         for (name in initializationOrder) {
             val definition = registry.getByName(name) ?: continue
-            if (definition.postEnableMethods.isEmpty()) continue
             val instance = cycleResolver.getSingleton(name) ?: continue
-            for (postEnable in definition.postEnableMethods) {
+
+            // 收集所有 @PostEnable 方法（包括实际类型上的）
+            val methods = collectLifecycleMethods(definition, instance, PostEnable::class.java)
+            for (postEnable in methods) {
                 try {
                     val invokeStart = System.nanoTime()
                     postEnable.invoke(instance)
@@ -148,9 +152,10 @@ class LifecycleManager(
 
         for (name in initializationOrder.reversed()) {
             val definition = registry.getByName(name) ?: continue
-            val instance = cycleResolver.getSingleton(name)
+            val instance = cycleResolver.getSingleton(name) ?: continue
             try {
-                for (preDestroy in definition.preDestroyMethods) {
+                val methods = collectLifecycleMethods(definition, instance, PreDestroy::class.java)
+                for (preDestroy in methods) {
                     val destroyStart = System.nanoTime()
                     preDestroy.invoke(instance)
                     val destroyMs = (System.nanoTime() - destroyStart) / 1_000_000.0
@@ -326,5 +331,36 @@ class LifecycleManager(
             visit(def)
         }
         return result
+    }
+
+    /**
+     * 收集生命周期方法。
+     * 对于 @Bean 工厂方法产物，如果实际实例类型与声明返回类型不同，
+     * 会补充扫描实际类型上的生命周期注解方法。
+     */
+    private fun collectLifecycleMethods(
+        definition: BeanDefinition,
+        instance: Any,
+        annotationClass: Class<out Annotation>
+    ): List<java.lang.reflect.Method> {
+        val definedMethods = when (annotationClass) {
+            PostEnable::class.java -> definition.postEnableMethods
+            PreDestroy::class.java -> definition.preDestroyMethods
+            else -> emptyList()
+        }
+
+        if (!definition.isFactoryBean()) return definedMethods
+
+        val actualClass = instance.javaClass
+        if (actualClass == definition.type) return definedMethods
+
+        // 补充扫描实际类型上的方法
+        val extraMethods = actualClass.declaredMethods.filter {
+            it.isAnnotationPresent(annotationClass)
+        }.filter { extra ->
+            definedMethods.none { it.name == extra.name && it.parameterCount == extra.parameterCount }
+        }.onEach { it.isAccessible = true }
+
+        return definedMethods + extraMethods
     }
 }

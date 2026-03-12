@@ -59,7 +59,16 @@ class BeanRegistry {
         return when {
             definitions.isEmpty() -> null
             definitions.size == 1 -> definitions[0]
-            else -> definitions.firstOrNull { it.isPrimary } ?: definitions[0]
+            else -> {
+                val primaries = definitions.filter { it.isPrimary }
+                when {
+                    primaries.size > 1 -> throw IllegalStateException(
+                        "[IoC] 类型 ${type.name} 存在多个 @Primary Bean: ${primaries.map { it.name }}，请只保留一个 @Primary"
+                    )
+                    primaries.size == 1 -> primaries[0]
+                    else -> definitions[0]
+                }
+            }
         }
     }
 
