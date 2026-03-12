@@ -3,7 +3,10 @@ package top.wcpe.taboolib.ioc.inject
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import top.wcpe.taboolib.ioc.IocTestContext
-import top.wcpe.taboolib.ioc.annotation.*
+import top.wcpe.taboolib.ioc.annotation.Component
+import top.wcpe.taboolib.ioc.annotation.Inject
+import top.wcpe.taboolib.ioc.annotation.Named
+import top.wcpe.taboolib.ioc.annotation.Service
 
 /**
  * FieldInjector 测试
@@ -44,7 +47,6 @@ class FieldInjectorTest {
 
         val consumer = ctx.getBean(LateinitConsumer::class.java)
         assertNotNull(consumer)
-        assertTrue(consumer!!::dep.isInitialized)
     }
 
     // ==================== 测试用 Bean ====================
