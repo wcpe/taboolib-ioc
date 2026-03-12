@@ -2,6 +2,7 @@ package top.wcpe.taboolib.ioc.bean
 
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
+import top.wcpe.taboolib.ioc.annotation.Lazy
 
 /**
  * Bean 元数据定义。
@@ -75,9 +76,12 @@ class BeanDefinition(
             }
 
             return constructor.parameterTypes.mapIndexed { index, type ->
+                val lazy = constructor.parameters.getOrNull(index)
+                    ?.getAnnotation(Lazy::class.java)?.value == true
                 InjectParameter(
                     type = type,
-                    nameQualifier = ConstructorQualifierResolver.resolve(constructor, index)
+                    nameQualifier = ConstructorQualifierResolver.resolve(constructor, index),
+                    lazy = lazy
                 )
             }
         }
@@ -88,7 +92,7 @@ class BeanDefinition(
             injectMethods: List<InjectMethod>
         ): List<InjectParameter> {
             return resolveConstructorParameters(constructor) +
-                injectFields.map { InjectParameter(it.requiredType, it.nameQualifier) } +
+                injectFields.map { InjectParameter(it.requiredType, it.nameQualifier, it.lazy) } +
                 injectMethods.flatMap { it.parameters }
         }
     }

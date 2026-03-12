@@ -5,6 +5,7 @@ import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.registerLifeCycleTask
+import top.wcpe.taboolib.ioc.annotation.Lazy
 import top.wcpe.taboolib.ioc.annotation.Named
 import top.wcpe.taboolib.ioc.annotation.Resource
 import top.wcpe.taboolib.ioc.bean.BeanContainer
@@ -107,6 +108,7 @@ object ObjectInjector {
             val inject = field.hasAnnotation(top.wcpe.taboolib.ioc.annotation.Inject::class.java)
             val resource = field.findAnnotation(Resource::class.java)
             val named = field.findAnnotation(Named::class.java)
+            val lazy = field.findAnnotation(Lazy::class.java)
 
             if (!inject && resource == null) continue
 
@@ -116,12 +118,16 @@ object ObjectInjector {
                 else -> null
             }
 
-            val value = BeanContainer.getBean(field.type, nameQualifier)
-
-            if (value != null) {
-                field.isAccessible = true
-                field.set(obj, value)
-                debug("[IoC] 自动注入 object 字段: ${clazz.simpleName}.${field.name}")
+            if (lazy?.value == true) {
+                // 延迟注入：通过 FieldInjector 创建代理
+                BeanContainer.injectLazyObjectField(obj, field.type, nameQualifier, field)
+            } else {
+                val value = BeanContainer.getBean(field.type, nameQualifier)
+                if (value != null) {
+                    field.isAccessible = true
+                    field.set(obj, value)
+                    debug("[IoC] 自动注入 object 字段: ${clazz.simpleName}.${field.name}")
+                }
             }
         }
     }

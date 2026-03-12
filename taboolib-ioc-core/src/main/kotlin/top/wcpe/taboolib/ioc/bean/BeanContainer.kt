@@ -102,6 +102,14 @@ object BeanContainer {
         debug("[IoC] 注册自定义作用域: $normalized")
     }
 
+    /**
+     * 为 object 类的 @Lazy 字段注入延迟代理。
+     * 供 ObjectInjector 调用，委托给内部的 FieldInjector。
+     */
+    internal fun injectLazyObjectField(instance: Any, type: Class<*>, nameQualifier: String?, field: java.lang.reflect.Field) {
+        fieldInjector.injectLazyField(instance, type, nameQualifier, field)
+    }
+
     internal fun initialize() {
         if (initialized) return
 

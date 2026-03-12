@@ -45,7 +45,8 @@ class Injector(
     }
 
     /**
-     * 解析构造函数参数
+     * 解析构造函数参数。
+     * 对标记了 @Lazy 的参数创建延迟代理，其余立即解析。
      */
     private fun resolveConstructorArgs(definition: BeanDefinition): Array<Any?> {
         if (definition.constructorParameters.isEmpty()) {
@@ -53,7 +54,11 @@ class Injector(
         }
 
         return definition.constructorParameters.map { parameter ->
-            beanProvider(parameter.type, parameter.nameQualifier)
+            if (parameter.lazy) {
+                fieldInjector.resolveLazyDependency(parameter.type, parameter.nameQualifier)
+            } else {
+                beanProvider(parameter.type, parameter.nameQualifier)
+            }
         }.toTypedArray()
     }
 

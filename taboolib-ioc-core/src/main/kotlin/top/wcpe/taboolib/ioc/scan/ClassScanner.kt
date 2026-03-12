@@ -26,7 +26,7 @@ class ClassScanner(
         val injectFields = resolveInjectFields(clazz)
         val injectMethods = resolveInjectMethods(clazz)
         val dependencies = constructorParameters +
-            injectFields.map { InjectParameter(it.requiredType, it.nameQualifier) } +
+            injectFields.map { InjectParameter(it.requiredType, it.nameQualifier, it.lazy) } +
             injectMethods.flatMap { method -> method.parameters }
         val postConstruct = findPostConstruct(clazz)
         val preDestroy = findPreDestroy(clazz)
@@ -105,9 +105,12 @@ class ClassScanner(
         }
 
         return constructor.parameterTypes.mapIndexed { index, type ->
+            val lazy = constructor.parameters.getOrNull(index)
+                ?.getAnnotation(Lazy::class.java)?.value == true
             InjectParameter(
                 type = type,
-                nameQualifier = ConstructorQualifierResolver.resolve(constructor, index)
+                nameQualifier = ConstructorQualifierResolver.resolve(constructor, index),
+                lazy = lazy
             )
         }
     }
@@ -120,6 +123,7 @@ class ClassScanner(
             val inject = field.hasAnnotation(Inject::class.java)
             val resource = field.findAnnotation(Resource::class.java)
             val named = field.findAnnotation(Named::class.java)
+            val lazy = field.findAnnotation(Lazy::class.java)
 
             if (!inject && resource == null) return@mapNotNull null
 
@@ -132,7 +136,8 @@ class ClassScanner(
             InjectField(
                 field = field,
                 requiredType = field.type,
-                nameQualifier = nameQualifier
+                nameQualifier = nameQualifier,
+                lazy = lazy?.value == true
             )
         }
     }
