@@ -29,8 +29,7 @@ object ObjectInjector {
     fun collectObjectClasses() {
         val start = System.nanoTime()
         objectClasses.clear()
-        for (reflexClass in top.wcpe.taboolib.ioc.scan.getRunningClassMapInJar().values) {
-            val javaClass = reflexClass.toClass() ?: continue
+        for (javaClass in top.wcpe.taboolib.ioc.scan.getRunningClassesInJar()) {
             if (!requiresObjectInjection(javaClass)) continue
             objectClasses += javaClass
         }

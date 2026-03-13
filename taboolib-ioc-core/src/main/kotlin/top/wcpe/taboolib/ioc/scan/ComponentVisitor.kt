@@ -10,21 +10,29 @@ import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
 import top.wcpe.taboolib.ioc.inject.ValueResolver
-import org.tabooproject.reflex.ReflexClass
 import taboolib.common.Inject as TabooLibInject
 
 /**
- * 通过反射获取 runningClassMapInJar，避免编译时绑定到具体返回类型。
+ * 通过反射获取 runningClassMapInJar 中的所有 Java Class。
  *
- * TabooLib 6.2.4 之前返回 HashMap<String, ReflexClass>，
- * 6.2.4-w1 之后返回 Map<String, ReflexClass>（可能是 LazyReflexClassMap 或 CompositeClassMap）。
- * 直接 import 属性会导致编译时字节码绑定到特定的 getter 签名，运行时版本不匹配时抛 NoSuchMethodError。
+ * 不直接引用 ReflexClass / runningClassMapInJar 属性，
+ * 因为 TabooLib 的 relocate 会把 org.tabooproject.reflex 重定向到插件包名下，
+ * 而且不同版本的 getter 返回类型签名不同（HashMap vs Map）。
+ * 全部通过反射调用，避免编译时绑定。
  */
 @Suppress("UNCHECKED_CAST")
-internal fun getRunningClassMapInJar(): Map<String, ReflexClass> {
-    val clazz = Class.forName("taboolib.common.io.ProjectScannerKt")
-    val method = clazz.methods.first { it.name == "getRunningClassMapInJar" }
-    return method.invoke(null) as Map<String, ReflexClass>
+internal fun getRunningClassesInJar(): List<Class<*>> {
+    val scannerClass = Class.forName("taboolib.common.io.ProjectScannerKt")
+    val method = scannerClass.methods.first { it.name == "getRunningClassMapInJar" }
+    val map = method.invoke(null) as Map<String, Any>  // Map<String, ReflexClass>
+    val toClassMethod = map.values.firstOrNull()?.javaClass?.getMethod("toClass") ?: return emptyList()
+    return map.values.mapNotNull { reflexClass ->
+        try {
+            toClassMethod.invoke(reflexClass) as? Class<*>
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 /**
@@ -47,9 +55,7 @@ object ComponentVisitor : ClassVisitor(1) {
         val totalStart = System.nanoTime()
 
         val classLoadStart = System.nanoTime()
-        val allClasses = getRunningClassMapInJar().values
-            .mapNotNull { it.toClass() }
-            .distinct()
+        val allClasses = getRunningClassesInJar().distinct()
         val classLoadMs = (System.nanoTime() - classLoadStart) / 1_000_000.0
         debug("[IoC] 类加载完成，共 ${allClasses.size} 个类，耗时 ${"%.2f".format(classLoadMs)}ms")
 
