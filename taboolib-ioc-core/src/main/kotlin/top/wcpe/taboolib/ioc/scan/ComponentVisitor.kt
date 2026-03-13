@@ -2,7 +2,6 @@ package top.wcpe.taboolib.ioc.scan
 
 import taboolib.common.LifeCycle
 import taboolib.common.inject.ClassVisitor
-import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import top.wcpe.taboolib.ioc.annotation.Configuration
@@ -11,7 +10,22 @@ import top.wcpe.taboolib.ioc.bean.BeanContainer
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.condition.ConditionEvaluator
 import top.wcpe.taboolib.ioc.inject.ValueResolver
+import org.tabooproject.reflex.ReflexClass
 import taboolib.common.Inject as TabooLibInject
+
+/**
+ * 通过反射获取 runningClassMapInJar，避免编译时绑定到具体返回类型。
+ *
+ * TabooLib 6.2.4 之前返回 HashMap<String, ReflexClass>，
+ * 6.2.4-w1 之后返回 Map<String, ReflexClass>（可能是 LazyReflexClassMap 或 CompositeClassMap）。
+ * 直接 import 属性会导致编译时字节码绑定到特定的 getter 签名，运行时版本不匹配时抛 NoSuchMethodError。
+ */
+@Suppress("UNCHECKED_CAST")
+internal fun getRunningClassMapInJar(): Map<String, ReflexClass> {
+    val clazz = Class.forName("taboolib.common.io.ProjectScannerKt")
+    val method = clazz.methods.first { it.name == "getRunningClassMapInJar" }
+    return method.invoke(null) as Map<String, ReflexClass>
+}
 
 /**
  * 在 LOAD 阶段主动扫描插件 Jar 内的组件类。
@@ -33,7 +47,7 @@ object ComponentVisitor : ClassVisitor(1) {
         val totalStart = System.nanoTime()
 
         val classLoadStart = System.nanoTime()
-        val allClasses = runningClassMapInJar.values
+        val allClasses = getRunningClassMapInJar().values
             .mapNotNull { it.toClass() }
             .distinct()
         val classLoadMs = (System.nanoTime() - classLoadStart) / 1_000_000.0

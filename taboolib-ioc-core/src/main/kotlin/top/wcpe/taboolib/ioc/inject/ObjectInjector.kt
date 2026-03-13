@@ -1,7 +1,6 @@
 package top.wcpe.taboolib.ioc.inject
 
 import taboolib.common.LifeCycle
-import taboolib.common.io.runningClassMapInJar
 import taboolib.common.platform.Awake
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.registerLifeCycleTask
@@ -30,7 +29,7 @@ object ObjectInjector {
     fun collectObjectClasses() {
         val start = System.nanoTime()
         objectClasses.clear()
-        for (reflexClass in runningClassMapInJar.values) {
+        for (reflexClass in top.wcpe.taboolib.ioc.scan.getRunningClassMapInJar().values) {
             val javaClass = reflexClass.toClass() ?: continue
             if (!requiresObjectInjection(javaClass)) continue
             objectClasses += javaClass
