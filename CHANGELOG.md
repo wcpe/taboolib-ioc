@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.1.0-SNAPSHOT] - 2026-03-12
+## [1.1.0] - 2026-03-14
 
 ### 新增
 
@@ -16,6 +16,7 @@
   - `@Bean` 方法级别条件注解支持（`@ConditionalOnClass`/`@ConditionalOnProperty`/`@ConditionalOnBean` 等可用于 `@Bean` 方法）
   - `@Bean` 返回接口类型时运行时补充扫描实际实现类的注入点和生命周期回调
 - 支持多个 `@PostConstruct`/`@PostEnable`/`@PreDestroy` 方法
+- Kotlin `companion object` 自动注入：支持在 `companion object` 中使用 `@Inject`/`@Resource` 注解注入字段，兼容 `@JvmField` 和非 `@JvmField` 两种写法，支持 `@Named` 名称限定和 `@Lazy` 代理
 - `@Inject` 增加 `required` 参数（`required=false` 时注入失败不抛异常）
 - `BeanPostProcessor` 扩展点（before/after initialization 回调）
 - `@DependsOn` 显式初始化顺序控制
@@ -123,12 +124,6 @@
 ---
 
 ## 版本规划
-
-### [1.1.0] - 即将发布
-- `@Configuration` + `@Bean` 完整 Java Config 支持
-- `BeanPostProcessor` 扩展点
-- `@DependsOn` 显式初始化顺序
-- `@PropertySource` 配置文件加载
 
 ### [1.2.0] - 计划中
 - CGLIB 代理支持（无接口类 AOP）

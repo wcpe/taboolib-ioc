@@ -14,7 +14,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突
@@ -1061,11 +1061,13 @@ class MyService
 class UserRepository // bean name: userRepository
 ```
 
-## Kotlin `object` 自动注入
+## Kotlin `object` / `companion object` 自动注入
 
-所有位于插件 Jar 中、字段上带 `@Inject` 或 `@Resource` 的 Kotlin `object` 都会自动注入。
+所有位于插件 Jar 中、字段上带 `@Inject` 或 `@Resource` 的 Kotlin `object` 和 `companion object` 都会自动注入。
 
-示例：
+注入发生在 ENABLE -90 阶段，容器初始化完成后执行。
+
+### Kotlin `object` 示例
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Inject
@@ -1076,6 +1078,40 @@ object PluginState {
     lateinit var userService: UserService
 }
 ```
+
+### Kotlin `companion object` 示例
+
+```kotlin
+import top.wcpe.yourplugin.ioc.annotation.Inject
+import top.wcpe.yourplugin.ioc.annotation.Named
+
+// 非 @JvmField（推荐）：backing field 在外部类静态字段，注解自动从 Companion 类查找
+class MyPlugin {
+    companion object {
+        @Inject
+        lateinit var userService: UserService
+
+        @Inject
+        @Named("wechatGateway")
+        lateinit var gateway: PaymentGateway
+    }
+}
+
+// @JvmField 同样支持
+class AnotherPlugin {
+    companion object {
+        @Inject
+        @JvmField
+        var userService: UserService? = null
+    }
+}
+```
+
+说明：
+
+- `companion object` 属性（无论是否有 `@JvmField`）的 backing field 都在外部类的静态字段上
+- 支持 `@Named` 名称限定和 `@Lazy` 代理注入
+- `@Lazy` 仅对接口类型有效，非接口类型回退到立即注入
 
 ## 示例插件覆盖
 

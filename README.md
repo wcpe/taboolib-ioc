@@ -2,7 +2,7 @@
 
 为 TabooLib Bukkit 插件场景提供的轻量 IoC 容器。
 
-[![版本](https://img.shields.io/badge/版本-1.1.0--SNAPSHOT-blue)](CHANGELOG.md)
+[![版本](https://img.shields.io/badge/版本-1.1.0-blue)](CHANGELOG.md)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-orange)](https://kotlinlang.org)
 [![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
 
@@ -20,7 +20,7 @@
 - 排序控制：`@Order` 控制 `getBeansOfType` 返回顺序和 AOP Advisor 执行顺序
 - 事件机制：`EventBus` 监听 Bean 创建/销毁和容器生命周期事件
 - 循环依赖检测：singleton Bean 的字段/方法循环依赖可解析，构造函数循环依赖会输出依赖链
-- Kotlin `object` 自动注入
+- Kotlin `object` / `companion object` 自动注入
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
 - 手动注册单例：`registerBean`
 - 按接口和父类类型解析 Bean
@@ -66,7 +66,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0-SNAPSHOT")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突
@@ -253,11 +253,13 @@ val optional = beanOrNull<UserService>()
 val allGateways = beans<PaymentGateway>()
 ```
 
-### 6. Kotlin object 注入
+### 6. Kotlin object / companion object 注入
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Inject
+import top.wcpe.yourplugin.ioc.annotation.Named
 
+// Kotlin object 自动注入
 object PluginState {
 
     @Inject
@@ -267,7 +269,30 @@ object PluginState {
         userService.getUser("123")
     }
 }
+
+// companion object 自动注入（非 @JvmField，推荐写法）
+class MyPlugin {
+    companion object {
+        @Inject
+        lateinit var userService: UserService
+
+        @Inject
+        @Named("wechatGateway")
+        lateinit var gateway: PaymentGateway
+    }
+}
+
+// companion object 注入（@JvmField 写法）
+class AnotherPlugin {
+    companion object {
+        @Inject
+        @JvmField
+        var userService: UserService? = null
+    }
+}
 ```
+
+> 说明：`object` 和 `companion object` 中带 `@Inject`/`@Resource` 的字段均在 ENABLE -90 阶段自动注入，无需手动操作。
 
 ### 7. 作用域与懒加载
 
@@ -632,7 +657,7 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 - 字段循环依赖示例
 - 构造函数循环依赖检测示例
 - `@PostConstruct` / `@PostEnable` / `@PreDestroy`
-- Kotlin `object` 自动注入
+- Kotlin `object` / `companion object` 自动注入
 - `BeanContainer` 全部公开查询/注册方法
 - Kotlin 扩展方法 `bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
 - 接口类型 `getBeansOfType` 聚合查询

@@ -1,6 +1,6 @@
 # taboolib-ioc 架构文档
 
-> 版本：1.1.0-SNAPSHOT | TabooLib 6.2.x | Kotlin 2.1.0
+> 版本：1.1.0 | TabooLib 6.2.x | Kotlin 2.1.0
 
 ---
 
@@ -93,6 +93,7 @@ sequenceDiagram
         CV->>CV: 阶段二：评估 @ConditionalOnBean / @ConditionalOnMissingBean
         TL->>OI: @Awake(LOAD) collectObjectClasses()
         OI->>OI: 收集带 @Inject/@Resource 的 Kotlin object 类
+        OI->>OI: 收集持有 companion object 且有 @Inject/@Resource 字段的外部类
         TL->>CL: @Awake(LOAD) registerLifecycleTasks()
         CL->>CL: 注册 ENABLE/DISABLE 阶段任务
     end
@@ -112,6 +113,7 @@ sequenceDiagram
 
         TL->>OI: ENABLE 优先级 -90
         OI->>OI: injectObjectFields — 注入 object 类字段
+        OI->>OI: injectCompanionFields — 注入 companion object 字段（外部类静态字段）
         OI->>OI: 支持 @Lazy 代理注入
 
         TL->>BC: ENABLE 优先级 -80
@@ -147,7 +149,7 @@ sequenceDiagram
 5. 阶段二扫描：
    - 评估延迟的 `@ConditionalOnBean` / `@ConditionalOnMissingBean`（此时 BeanRegistry 已有阶段一的注册结果）
 
-同时，`ObjectInjector.collectObjectClasses()` 在 LOAD 阶段收集所有带 `@Inject`/`@Resource` 字段的 Kotlin `object` 类，并注册 ENABLE -90 的注入任务。
+同时，`ObjectInjector.collectObjectClasses()` 在 LOAD 阶段收集所有带 `@Inject`/`@Resource` 字段的 Kotlin `object` 类及持有 `companion object` 的外部类，并注册 ENABLE -90 的注入任务。
 
 ### 3.2 ENABLE -100 — 容器初始化
 
@@ -173,8 +175,9 @@ LifecycleManager.initialize()
 
 入口：`ObjectInjector.injectObjectFields()`
 
-- 遍历 LOAD 阶段收集的 Kotlin `object` 类
-- 通过 `INSTANCE` 静态字段获取 object 单例
+- 遍历 LOAD 阶段收集的 Kotlin `object` 类，通过 `INSTANCE` 静态字段获取单例并注入
+- 遍历 LOAD 阶段收集的持有 `companion object` 的外部类，获取 `Companion` 实例并注入外部类静态字段
+- `companion object` 属性（无论 `@JvmField` 与否）的 backing field 均在外部类静态字段上
 - 对每个 `@Inject`/`@Resource` 字段：
   - 带 `@Lazy`：通过 `BeanContainer.injectLazyObjectField()` → `FieldInjector.injectLazyField()` 创建 JDK 动态代理
   - 不带 `@Lazy`：直接调用 `BeanContainer.getBean()` 获取实例并注入
