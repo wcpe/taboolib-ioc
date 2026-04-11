@@ -33,10 +33,18 @@ dependencies {
     // 测试依赖 - 直接引用 ioc-core 和 ioc-api 以访问容器内部 API
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))
+    testImplementation(project(":taboolib-ioc-annotation"))
+    testImplementation(project(":taboolib-ioc-test"))
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.1")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.1")
 }
 
 tasks.withType<Test> {
+    workingDir = layout.buildDirectory.dir("taboolib-ioc/run").get().asFile.also { it.mkdirs() }
     useJUnitPlatform()
+}
+
+// 示例模块不需要发布
+tasks.matching { it.name.startsWith("publish") }.configureEach {
+    enabled = false
 }

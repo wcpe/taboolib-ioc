@@ -16,7 +16,7 @@ dependencies {
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))
     testImplementation(project(":taboolib-ioc-annotation"))
-    testImplementation(testFixtures(project(":taboolib-ioc-core")))
+    testImplementation(project(":taboolib-ioc-test"))
 
     // MockBukkit for 1.12 (artifact name is MockBukkit-v1.13)
     testImplementation("com.github.seeseemelk:MockBukkit-v1.13:0.2.0")
@@ -27,6 +27,7 @@ dependencies {
 }
 
 tasks.withType<Test> {
+    workingDir = layout.buildDirectory.dir("taboolib-ioc/run").get().asFile.also { it.mkdirs() }
     useJUnitPlatform()
 }
 

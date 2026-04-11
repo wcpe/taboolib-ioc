@@ -34,7 +34,7 @@ dependencies {
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))
     testImplementation(project(":taboolib-ioc-annotation"))
-    testImplementation(testFixtures(project(":taboolib-ioc-core")))
+    testImplementation(project(":taboolib-ioc-test"))
 
     // MockBukkit
     testImplementation("com.github.seeseemelk:MockBukkit-v1.20:3.93.2")
@@ -45,6 +45,7 @@ dependencies {
 }
 
 tasks.withType<Test> {
+    workingDir = layout.buildDirectory.dir("taboolib-ioc/run").get().asFile.also { it.mkdirs() }
     useJUnitPlatform()
 }
 

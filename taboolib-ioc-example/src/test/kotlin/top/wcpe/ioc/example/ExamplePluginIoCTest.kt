@@ -2,6 +2,7 @@ package top.wcpe.ioc.example
 
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import top.wcpe.taboolib.ioc.IocTestContext
 import top.wcpe.taboolib.ioc.annotation.*
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanScope
