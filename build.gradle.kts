@@ -4,7 +4,7 @@ plugins {
     java
     `maven-publish`
     id("io.izzel.taboolib") version "2.0.28" apply false
-    kotlin("jvm") version "2.1.0" apply false
+    kotlin("jvm") version "1.9.25" apply false
 }
 
 subprojects {

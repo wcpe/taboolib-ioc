@@ -3,7 +3,7 @@
 为 TabooLib Bukkit 插件场景提供的轻量 IoC 容器。
 
 [![版本](https://img.shields.io/badge/版本-1.1.0-blue)](CHANGELOG.md)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-orange)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9.25-orange)](https://kotlinlang.org)
 [![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
 
 ## 当前支持
@@ -714,7 +714,7 @@ IoC 容器的一大优势是让业务组件可以脱离 Bukkit/TabooLib 运行�
 
 ### 配置测试依赖
 
-在示例插件（或你自己的插件）的 `build.gradle.kts` 中添加：
+如果你只是在仓库内部写测试，可以继续直接依赖 `taboolib-ioc-core` 的普通测试源码；如果你希望把这套测试能力稳定提供给外部使用，建议直接依赖新模块 `taboolib-ioc-test`：
 
 ```kotlin
 dependencies {
@@ -724,6 +724,8 @@ dependencies {
     // 测试依赖
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))
+    testImplementation(project(":taboolib-ioc-annotation"))
+    testImplementation(project(":taboolib-ioc-test"))
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.1")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.1")
 }
@@ -735,7 +737,7 @@ tasks.withType<Test> {
 
 ### IocTestContext 测试上下文
 
-`IocTestContext` 是一个不依赖 `BeanContainer` 单例的独立容器，每个测试方法创建自己的实例，互不干扰：
+`IocTestContext` 是一个不依赖 `BeanContainer` 单例的独立容器；在新模块里它会作为稳定测试能力一起发布，每个测试方法创建自己的实例，互不干扰：
 
 ```kotlin
 val ctx = IocTestContext()
@@ -745,6 +747,32 @@ ctx.registerBean("config", AppConfig())    // 手动注册实例
 ctx.initialize()                           // 初始化容器
 
 val service = ctx.getBean(UserService::class.java)  // 获取 Bean
+```
+
+### TabooLibIocTest 全链路引导（推荐）
+
+`@TabooLibIocTest` 会在测试启动时模拟 Bukkit 生命周期主链路：
+
+- 生命周期推进（`CONST -> INIT -> LOAD -> ENABLE -> ACTIVE`）
+- 结束测试时执行关闭链路（`onDisable -> DISABLE`）
+
+默认不会触发 PrimitiveLoader 自动下载，测试优先使用 Gradle 缓存中的依赖。若你确实需要对齐原始加载器链路，再显式开启：`enablePrimitiveBootstrap = true`。
+
+如果需要可观测日志，打开 `observable = true`：
+
+```kotlin
+@TabooLibIocTest(
+    DemoService::class,
+    targetLifeCycle = LifeCycle.ACTIVE,
+    invokePostEnable = true,
+    observable = true,
+    enablePrimitiveBootstrap = false
+)
+class DemoTest {
+
+    @IocAutowired
+    lateinit var service: DemoService
+}
 ```
 
 ### 测试用例示例
