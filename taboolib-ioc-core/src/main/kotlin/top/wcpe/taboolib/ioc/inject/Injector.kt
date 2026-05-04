@@ -136,7 +136,11 @@ class Injector(
      */
     fun invokePostConstruct(instance: Any, definition: BeanDefinition) {
         for (method in definition.postConstructMethods) {
-            method.invoke(instance)
+            try {
+                method.invoke(instance)
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                throw e.targetException ?: e
+            }
         }
         // 补充扫描：@Bean 返回接口类型时，实际实例可能有额外的 @PostConstruct
         if (definition.isFactoryBean()) {
@@ -149,7 +153,11 @@ class Injector(
                 }
                 for (method in extraMethods) {
                     method.isAccessible = true
-                    method.invoke(instance)
+                    try {
+                        method.invoke(instance)
+                    } catch (e: java.lang.reflect.InvocationTargetException) {
+                        throw e.targetException ?: e
+                    }
                 }
             }
         }

@@ -3,6 +3,7 @@ import io.izzel.taboolib.gradle.Bukkit
 
 plugins {
     id("io.izzel.taboolib")
+    id("xyz.jpenilla.run-paper")
     kotlin("jvm")
 }
 
@@ -47,4 +48,9 @@ tasks.withType<Test> {
 // 示例模块不需要发布
 tasks.matching { it.name.startsWith("publish") }.configureEach {
     enabled = false
+}
+
+tasks.named<xyz.jpenilla.runpaper.task.RunServer>("runServer") {
+    minecraftVersion("1.20.4")
+    pluginJars(tasks.named("taboolibBuildPlugin").map { it.outputs.files.singleFile })
 }

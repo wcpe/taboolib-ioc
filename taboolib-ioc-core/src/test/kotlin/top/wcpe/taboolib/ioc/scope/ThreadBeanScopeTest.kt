@@ -151,9 +151,9 @@ class ThreadBeanScopeTest {
             }
             latch.await(5, TimeUnit.SECONDS)
 
-            // 因为线程池只有 2 个线程，所以只会创建 2 个实例
-            val aliveCount = weakRefs.count { it.get() != null }
-            assertTrue(aliveCount <= 2, "线程池有 2 个线程，未清理时应最多保留 2 个实例，实际: $aliveCount")
+            // 因为线程池只有 2 个线程，未清理时最多保留 2 个不同的实例
+            val aliveInstances = weakRefs.mapNotNull { it.get() }.toSet()
+            assertTrue(aliveInstances.size <= 2, "线程池有 2 个线程，未清理时应最多保留 2 个不同实例，实际: ${aliveInstances.size}")
         } finally {
             executor.shutdown()
             executor.awaitTermination(5, TimeUnit.SECONDS)
