@@ -94,10 +94,135 @@ object BeanContainer {
 
     fun getBeanNames(): Set<String> = resolver.getBeanNames()
 
+    /**
+     * 手动注册 Bean 实例。
+     * 
+     * 注册的 Bean 会经过完整的生命周期处理：
+     * - 属性注入（@Inject 字段和方法）
+     * - BeanPostProcessor 回调
+     * - @PostConstruct 回调
+     * - AOP 代理包装
+     * - @PreDestroy 回调（容器关闭时）
+     * 
+     * @param name Bean 名称
+     * @param instance Bean 实例
+     */
     fun registerBean(name: String, instance: Any) {
-        manualBeansByName[name] = instance
-        cycleResolver.addSingleton(name, instance)
-        debug("[IoC] 手动注册 Bean: $name")
+        if (!initialized && !initializing) {
+            // 容器未初始化时，直接存储，等待容器初始化后处理
+            manualBeansByName[name] = instance
+            cycleResolver.addSingleton(name, instance)
+            debug("[IoC] 手动注册 Bean（待处理）: $name")
+            return
+        }
+
+        // 容器已初始化，执行完整生命周期
+        val definition = createManualBeanDefinition(name, instance)
+        registry.register(definition)
+        
+        try {
+            // 执行属性注入
+            injector.populate(instance, definition)
+            
+            // BeanPostProcessor — before initialization
+            var processedInstance = instance
+            for (processor in lifecycleManager.getBeanPostProcessors()) {
+                processedInstance = processor.postProcessBeforeInitialization(processedInstance, name)
+            }
+            
+            // 执行 @PostConstruct 回调
+            injector.invokePostConstruct(processedInstance, definition)
+            
+            // BeanPostProcessor — after initialization
+            for (processor in lifecycleManager.getBeanPostProcessors()) {
+                processedInstance = processor.postProcessAfterInitialization(processedInstance, name)
+            }
+            
+            // AOP 代理包装
+            val finalInstance = if (aopProxyFactory != null) {
+                val proxy = aopProxyFactory.wrapIfNecessary(processedInstance, definition.type)
+                if (proxy !== processedInstance) {
+                    debug("[IoC] 手动注册的 Bean 已包装 AOP 代理: $name")
+                }
+                proxy
+            } else {
+                processedInstance
+            }
+            
+            // 缓存到容器
+            manualBeansByName[name] = finalInstance
+            cycleResolver.addSingleton(name, finalInstance)
+            
+            // 记录初始化顺序（用于 @PreDestroy）
+            lifecycleManager.recordInitialization(name)
+            
+            debug("[IoC] 手动注册 Bean（已完成生命周期）: $name")
+        } catch (e: Exception) {
+            registry.remove(name)
+            manualBeansByName.remove(name)
+            cycleResolver.removeSingleton(name)
+            throw IllegalStateException("手动注册 Bean 失败: $name", e)
+        }
+    }
+    
+    /**
+     * 为手动注册的 Bean 创建 BeanDefinition。
+     * 扫描实例类上的注入点和生命周期方法。
+     */
+    private fun createManualBeanDefinition(name: String, instance: Any): BeanDefinition {
+        val clazz = instance.javaClass
+        
+        // 扫描 @Inject 字段
+        val injectFields = scanner.scanInjectFields(clazz)
+        
+        // 扫描 @Inject 方法
+        val injectMethods = scanner.scanInjectMethods(clazz)
+        
+        // 扫描 @Value 字段
+        val valueFields = scanner.scanValueFields(clazz)
+        
+        // 扫描生命周期方法
+        val postConstructMethods = clazz.declaredMethods.filter {
+            it.isAnnotationPresent(top.wcpe.taboolib.ioc.annotation.PostConstruct::class.java)
+        }.onEach { it.isAccessible = true }
+        
+        val postEnableMethods = clazz.declaredMethods.filter {
+            it.isAnnotationPresent(top.wcpe.taboolib.ioc.annotation.PostEnable::class.java)
+        }.onEach { it.isAccessible = true }
+        
+        val preDestroyMethods = clazz.declaredMethods.filter {
+            it.isAnnotationPresent(top.wcpe.taboolib.ioc.annotation.PreDestroy::class.java)
+        }.onEach { it.isAccessible = true }
+        
+        // 收集依赖信息
+        val dependencies = injectFields.map { field ->
+            InjectParameter(field.requiredType, field.nameQualifier, field.lazy)
+        } + injectMethods.flatMap { it.parameters }
+        
+        return BeanDefinition(
+            name = name,
+            type = clazz,
+            constructor = null, // 手动注册的实例已经创建，不需要构造函数
+            injectFields = injectFields,
+            injectMethods = injectMethods,
+            postConstruct = postConstructMethods.firstOrNull(),
+            postEnable = postEnableMethods.firstOrNull(),
+            preDestroy = preDestroyMethods.firstOrNull(),
+            constructorParameters = emptyList(),
+            dependencies = dependencies,
+            lazyInit = false,
+            scope = BeanScopes.SINGLETON,
+            isAspect = false,
+            isPrimary = false,
+            order = Int.MAX_VALUE,
+            valueFields = valueFields,
+            factoryBeanName = null,
+            factoryMethod = null,
+            dependsOn = emptyList(),
+            postConstructMethods = postConstructMethods,
+            postEnableMethods = postEnableMethods,
+            preDestroyMethods = preDestroyMethods
+        )
     }
 
     fun registerScope(name: String, scope: BeanScope) {
@@ -142,26 +267,30 @@ object BeanContainer {
     internal fun initialize() {
         if (initialized) return
 
-        registerBuiltinScopes()
+        synchronized(this) {
+            if (initialized) return
 
-        val start = System.nanoTime()
-        debug("[IoC] 开始初始化容器，共 ${registry.getAll().size} 个 Bean 定义")
+            registerBuiltinScopes()
 
-        initializing = true
-        try {
-            // 先初始化切面 Bean 并解析 Advisor
-            initializeAspects()
-            // 发现并注册 BeanPostProcessor
-            discoverBeanPostProcessors()
-            // 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
-            lifecycleManager.initialize()
-            initialized = true
-        } finally {
-            initializing = false
+            val start = System.nanoTime()
+            debug("[IoC] 开始初始化容器，共 ${registry.getAll().size} 个 Bean 定义")
+
+            initializing = true
+            try {
+                // 先初始化切面 Bean 并解析 Advisor
+                initializeAspects()
+                // 发现并注册 BeanPostProcessor
+                discoverBeanPostProcessors()
+                // 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
+                lifecycleManager.initialize()
+                initialized = true
+            } finally {
+                initializing = false
+            }
+
+            val ms = (System.nanoTime() - start) / 1_000_000.0
+            debug("[IoC] BeanContainer 初始化完成，总耗时 ${"%.2f".format(ms)}ms")
         }
-
-        val ms = (System.nanoTime() - start) / 1_000_000.0
-        debug("[IoC] BeanContainer 初始化完成，总耗时 ${"%.2f".format(ms)}ms")
     }
 
     /**
@@ -257,7 +386,7 @@ object BeanContainer {
             customScopes[BeanScopes.THREAD] = ThreadBeanScope()
         }
         if (!customScopes.containsKey(BeanScopes.REFRESH)) {
-            customScopes[BeanScopes.REFRESH] = RefreshBeanScope()
+            customScopes[BeanScopes.REFRESH] = RefreshBeanScope(registry)
         }
     }
 

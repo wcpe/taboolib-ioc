@@ -91,11 +91,11 @@ class FieldInjector(
             val args = injectMethod.parameters.mapIndexed { index, param ->
                 val value = resolveDependency(param.type, param.nameQualifier)
                 if (value == null) {
-                    warning(
-                        "[IoC] 方法注入参数解析失败: ${instance.javaClass.simpleName}.${injectMethod.method.name}" +
+                    throw IllegalStateException(
+                        "[IoC] 方法注入参数解析失败: ${instance.javaClass.simpleName}.${injectMethod.method.name}()" +
                             " 参数[$index] (类型=${param.type.simpleName}" +
                             "${if (param.nameQualifier != null) ", 名称=${param.nameQualifier}" else ""})" +
-                            " — 未找到匹配的 Bean"
+                            " — 未找到匹配的 Bean。请确保依赖已注册或使用 @Named 指定正确的 Bean 名称"
                     )
                 }
                 value

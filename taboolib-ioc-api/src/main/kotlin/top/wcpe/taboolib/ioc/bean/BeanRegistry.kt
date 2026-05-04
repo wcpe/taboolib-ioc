@@ -102,6 +102,18 @@ class BeanRegistry {
         definitionsByType.clear()
     }
 
+    /**
+     * 移除指定名称的 Bean 定义。
+     *
+     * @param name Bean 名称
+     */
+    fun remove(name: String) {
+        val definition = definitionsByName.remove(name) ?: return
+        resolveAssignableTypes(definition.type).forEach { type ->
+            definitionsByType[type]?.remove(definition)
+        }
+    }
+
     private fun resolveAssignableTypes(type: Class<*>): Set<Class<*>> {
         val resolved = linkedSetOf<Class<*>>()
 

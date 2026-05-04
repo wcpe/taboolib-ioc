@@ -48,6 +48,17 @@ class LifecycleManager(
         beanPostProcessors.add(processor)
     }
 
+    fun getBeanPostProcessors(): List<BeanPostProcessor> = beanPostProcessors.toList()
+
+    /**
+     * 记录 Bean 的初始化顺序（用于手动注册的 Bean）
+     */
+    fun recordInitialization(name: String) {
+        if (initializedSingletons.add(name)) {
+            initializationOrder.add(name)
+        }
+    }
+
     /**
      * 初始化容器
      */
@@ -60,7 +71,7 @@ class LifecycleManager(
         debug("[IoC] 作用域验证完成，耗时 ${"%.2f".format(validateMs)}ms")
 
         val cycleStart = System.nanoTime()
-        logResolvableDependencyCycles(definitions.filter(BeanDefinition::isSingletonScope))
+        logResolvableDependencyCycles(definitions)
         val cycleMs = (System.nanoTime() - cycleStart) / 1_000_000.0
         debug("[IoC] 循环依赖检测完成，耗时 ${"%.2f".format(cycleMs)}ms")
 
@@ -141,6 +152,7 @@ class LifecycleManager(
         singletonLocks.clear()
         creationStack.remove()
         beanPostProcessors.clear()
+        cycleResolver.clear()
     }
 
     /**
@@ -279,7 +291,28 @@ class LifecycleManager(
         )
 
         cycles.forEach { cycle ->
-            debug("[IoC] 检测到可由单例早期暴露处理的循环依赖: ${cycle.joinToString(" -> ")}")
+            // 检查循环中所有 Bean 的作用域
+            val scopes = cycle.dropLast(1).mapNotNull { beanName ->
+                definitionByName[beanName]?.scope
+            }.toSet()
+            
+            val scopeInfo = if (scopes.size == 1) {
+                val scope = BeanScopes.normalize(scopes.first())
+                "[$scope]"
+            } else {
+                "[混合作用域: ${scopes.joinToString(", ")}]"
+            }
+            
+            // 判断是否可解析
+            val allSingleton = cycle.dropLast(1).all { beanName ->
+                definitionByName[beanName]?.isSingletonScope() == true
+            }
+            
+            if (allSingleton) {
+                debug("[IoC] 检测到可由单例早期暴露处理的循环依赖 $scopeInfo: ${cycle.joinToString(" -> ")}")
+            } else {
+                warning("[IoC] 检测到无法解析的循环依赖 $scopeInfo: ${cycle.joinToString(" -> ")}")
+            }
         }
     }
 

@@ -63,12 +63,26 @@ class Injector(
         if (definition.constructorParameters.isEmpty()) {
             return emptyArray()
         }
-        return definition.constructorParameters.map { parameter ->
-            if (parameter.lazy) {
+        return definition.constructorParameters.mapIndexed { index, parameter ->
+            val resolved = if (parameter.lazy) {
                 fieldInjector.resolveLazyDependency(parameter.type, parameter.nameQualifier)
             } else {
                 beanProvider(parameter.type, parameter.nameQualifier)
             }
+
+            // 验证非 Lazy 参数不能为 null
+            if (resolved == null && !parameter.lazy) {
+                throw BeanInstantiationException.missingFactoryMethodParameter(
+                    beanName = definition.name,
+                    factoryBeanName = definition.factoryBeanName!!,
+                    factoryMethodName = definition.factoryMethod!!.name,
+                    parameterIndex = index,
+                    parameterType = parameter.type,
+                    nameQualifier = parameter.nameQualifier
+                )
+            }
+
+            resolved
         }.toTypedArray()
     }
 
@@ -150,12 +164,25 @@ class Injector(
             return emptyArray()
         }
 
-        return definition.constructorParameters.map { parameter ->
-            if (parameter.lazy) {
+        return definition.constructorParameters.mapIndexed { index, parameter ->
+            val resolved = if (parameter.lazy) {
                 fieldInjector.resolveLazyDependency(parameter.type, parameter.nameQualifier)
             } else {
                 beanProvider(parameter.type, parameter.nameQualifier)
             }
+
+            // 验证非 Lazy 参数不能为 null
+            if (resolved == null && !parameter.lazy) {
+                throw BeanInstantiationException.missingConstructorParameter(
+                    beanName = definition.name,
+                    beanType = definition.type,
+                    parameterIndex = index,
+                    parameterType = parameter.type,
+                    nameQualifier = parameter.nameQualifier
+                )
+            }
+
+            resolved
         }.toTypedArray()
     }
 

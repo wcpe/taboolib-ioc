@@ -172,4 +172,9 @@ class IocTestContext {
 
     /** 获取已创建的 singleton 实例 */
     fun getSingleton(name: String): Any? = cycleResolver.getSingleton(name)
+
+    /** 关闭容器，执行所有 Bean 的销毁回调 */
+    fun shutdown() {
+        lifecycleManager.shutdown()
+    }
 }

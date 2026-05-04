@@ -51,7 +51,7 @@ class ScopeTest {
     @Test
     fun `refresh scope should return same instance until refreshed`() {
         val ctx = IocTestContext()
-        val refreshScope = RefreshBeanScope()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         ctx.registerScope(BeanScopes.REFRESH, refreshScope)
         ctx.register(RefreshScopedBean::class.java)
         ctx.initialize()
@@ -70,7 +70,7 @@ class ScopeTest {
     @Test
     fun `refresh scope should support refreshing by name`() {
         val ctx = IocTestContext()
-        val refreshScope = RefreshBeanScope()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         ctx.registerScope(BeanScopes.REFRESH, refreshScope)
         ctx.register(RefreshScopedBean::class.java)
         ctx.initialize()
@@ -136,7 +136,7 @@ class ScopeTest {
     @Test
     fun `refresh scope concurrent read during refresh should not throw`() {
         val ctx = IocTestContext()
-        val refreshScope = RefreshBeanScope()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         ctx.registerScope(BeanScopes.REFRESH, refreshScope)
         ctx.register(RefreshScopedBean::class.java)
         ctx.initialize()
@@ -185,7 +185,7 @@ class ScopeTest {
     @Test
     fun `refresh scope bean should have dependency injected after refresh`() {
         val ctx = IocTestContext()
-        val refreshScope = RefreshBeanScope()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         ctx.registerScope(BeanScopes.REFRESH, refreshScope)
         ctx.register(SingletonDep::class.java)
         ctx.register(RefreshScopedWithDep::class.java)
@@ -207,7 +207,8 @@ class ScopeTest {
 
     @Test
     fun `refresh by non-existent name should not error`() {
-        val refreshScope = RefreshBeanScope()
+        val ctx = IocTestContext()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         assertDoesNotThrow {
             refreshScope.refresh("nonExistent")
         }
@@ -216,7 +217,7 @@ class ScopeTest {
     @Test
     fun `refresh scope clear should remove all cached instances`() {
         val ctx = IocTestContext()
-        val refreshScope = RefreshBeanScope()
+        val refreshScope = RefreshBeanScope(ctx.registry)
         ctx.registerScope(BeanScopes.REFRESH, refreshScope)
         ctx.register(RefreshScopedBean::class.java)
         ctx.initialize()

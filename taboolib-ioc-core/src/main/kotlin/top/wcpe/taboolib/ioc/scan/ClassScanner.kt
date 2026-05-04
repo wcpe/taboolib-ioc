@@ -151,6 +151,27 @@ class ClassScanner(
     }
 
     /**
+     * 解析需要注入的字段（公开方法，供手动注册 Bean 使用）
+     */
+    fun scanInjectFields(clazz: Class<*>): List<InjectField> {
+        return resolveInjectFields(clazz)
+    }
+
+    /**
+     * 解析需要注入的方法（公开方法，供手动注册 Bean 使用）
+     */
+    fun scanInjectMethods(clazz: Class<*>): List<InjectMethod> {
+        return resolveInjectMethods(clazz)
+    }
+
+    /**
+     * 解析 @Value 字段（公开方法，供手动注册 Bean 使用）
+     */
+    fun scanValueFields(clazz: Class<*>): List<ValueField> {
+        return resolveValueFields(clazz)
+    }
+
+    /**
      * 解析需要注入的字段
      */
     private fun resolveInjectFields(clazz: Class<*>): List<InjectField> {
