@@ -125,3 +125,6 @@ bin/
 .gradle-verify/
 .narrafork/
 .worktrees/
+
+test-report.md
+test-report.md
