@@ -111,7 +111,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build plugin jar
-        run: ./gradlew :${{ matrix.module }}:taboolibBuildPlugin --no-daemon
+        run: ./gradlew :${{ matrix.module }}:assemble --no-daemon
 
       - name: Locate plugin jar
         id: jar

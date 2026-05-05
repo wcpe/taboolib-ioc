@@ -82,5 +82,5 @@ tasks.matching { it.name.startsWith("publish") }.configureEach {
 
 tasks.named<xyz.jpenilla.runpaper.task.RunServer>("runServer") {
     minecraftVersion("1.20.4")
-    pluginJars(tasks.named("taboolibBuildPlugin").map { it.outputs.files.singleFile })
+    pluginJars(tasks.named("taboolibMainTask").map { it.outputs.files.singleFile })
 }

@@ -65,7 +65,7 @@ tasks.matching { it.name.startsWith("publish") }.configureEach {
 
 tasks.named<xyz.jpenilla.runpaper.task.RunServer>("runServer") {
     minecraftVersion("1.12.2")
-    pluginJars(tasks.named("taboolibBuildPlugin").map { it.outputs.files.singleFile })
+    pluginJars(tasks.named("taboolibMainTask").map { it.outputs.files.singleFile })
 }
 
 // Paper 没有 1.12.2 官方构建，使用 dev.s7a.gradle.minecraft.server 通过 BuildTools 风格的
@@ -73,12 +73,12 @@ tasks.named<xyz.jpenilla.runpaper.task.RunServer>("runServer") {
 tasks.register<dev.s7a.gradle.minecraft.server.tasks.LaunchMinecraftServerTask>("runSpigot12") {
     group = "run paper"
     description = "Run a real Spigot 1.12.2 server with the built plugin jar."
-    dependsOn("taboolibBuildPlugin")
+    dependsOn("taboolibMainTask")
     doFirst {
         val pluginsDir = layout.buildDirectory.dir("MinecraftServer12/plugins").get().asFile
         pluginsDir.mkdirs()
         copy {
-            from(tasks.named("taboolibBuildPlugin").get().outputs.files)
+            from(tasks.named("taboolibMainTask").get().outputs.files)
             into(pluginsDir)
         }
     }
