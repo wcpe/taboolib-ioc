@@ -62,8 +62,10 @@ object ObjectInjector {
                 val objMs = (System.nanoTime() - objStart) / 1_000_000.0
                 injected++
                 debug("[IoC] object 注入完成: ${clazz.simpleName}，耗时 ${"%.2f".format(objMs)}ms")
-            } catch (e: Exception) {
-                debug("[IoC] object 注入失败: ${clazz.name} - ${e.message}")
+            } catch (e: Throwable) {
+                // 用 Throwable 而非 Exception：注入单个类时若触发 NoClassDefFoundError 等 Error
+                // （如平台缺失类），跳过该类即可，绝不让其冒泡崩掉整个插件 enable。
+                debug("[IoC] object 注入失败（已跳过该类，不影响其他）: ${clazz.name} - ${e.message}")
             }
         }
         // 注入 companion object 字段（字段在外部类上）
@@ -75,8 +77,8 @@ object ObjectInjector {
                 val objMs = (System.nanoTime() - objStart) / 1_000_000.0
                 injected++
                 debug("[IoC] companion object 注入完成: ${outerClass.simpleName}，耗时 ${"%.2f".format(objMs)}ms")
-            } catch (e: Exception) {
-                debug("[IoC] companion object 注入失败: ${outerClass.name} - ${e.message}")
+            } catch (e: Throwable) {
+                debug("[IoC] companion object 注入失败（已跳过该类，不影响其他）: ${outerClass.name} - ${e.message}")
             }
         }
 
