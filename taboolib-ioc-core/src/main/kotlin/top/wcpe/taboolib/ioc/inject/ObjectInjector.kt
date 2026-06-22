@@ -2,6 +2,8 @@ package top.wcpe.taboolib.ioc.inject
 
 import taboolib.common.LifeCycle
 import taboolib.common.platform.Awake
+import taboolib.common.platform.Platform
+import taboolib.common.platform.PlatformSide
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.registerLifeCycleTask
 import top.wcpe.taboolib.ioc.annotation.Lazy
@@ -33,6 +35,11 @@ object ObjectInjector {
         objectClasses.clear()
         companionClasses.clear()
         for (javaClass in top.wcpe.taboolib.ioc.scan.getRunningClassesInJar()) {
+            // 平台门控：错误平台的宿主在收集阶段即跳过，根本不去反射它（见 isPlatformMatched）。
+            if (!isPlatformMatched(javaClass)) {
+                debug("[IoC] 平台门控跳过 ${javaClass.name}（@PlatformSide 不含当前平台 ${Platform.CURRENT}）")
+                continue
+            }
             if (requiresCompanionInjection(javaClass)) {
                 companionClasses += javaClass
             } else if (requiresObjectInjection(javaClass)) {
@@ -44,6 +51,28 @@ object ObjectInjector {
         registerLifeCycleTask(LifeCycle.ENABLE, -90, Runnable {
             injectObjectFields()
         })
+    }
+
+    /**
+     * 平台门控：宿主类标了 @PlatformSide 且其平台集合不含当前运行平台时返回 false（应跳过收集）；
+     * 未标 @PlatformSide 视为全平台，返回 true。
+     *
+     * 必要性：本注入器经 [top.wcpe.taboolib.ioc.scan.getRunningClassesInJar] 直接读 TabooLib 的
+     * runningClassMapInJar，刻意绕过 TabooLib 逐类 ClassVisitor（避免包名含 ".taboolib." 被误判为
+     * 内部类而跳过），因而丢失了 TabooLib 自带的 @PlatformSide 过滤——错误平台的宿主（如 Bukkit 上
+     * 标 @PlatformSide(BUNGEE) 的事件监听器）若被收集，注入时反射其 declaredMethods 会解析跨平台类
+     * 入参（如 Bungee PostLoginEvent），当前平台缺失即抛 NoClassDefFoundError、崩掉整个插件 enable。
+     * 在收集源头按平台跳过即根治；读注解只访问常量池、不解析方法签名，故安全。注入路径仍保留对
+     * NoClassDefFoundError 的防御性捕获，兜底未标注解却引用缺失类的情形。
+     */
+    private fun isPlatformMatched(clazz: Class<*>): Boolean {
+        return try {
+            val side = clazz.getAnnotation(PlatformSide::class.java) ?: return true
+            side.value.contains(Platform.CURRENT)
+        } catch (e: Throwable) {
+            // 读注解异常不擅自跳过，交由注入路径的防御性捕获兜底。
+            true
+        }
     }
 
     /**
