@@ -775,6 +775,8 @@ class DemoTest {
 }
 ```
 
+更完整的测试支持说明见 [docs/testing.md](docs/testing.md)。
+
 ### 测试用例示例
 
 示例插件包含 60+ 个测试用例，覆盖 IoC 容器的全部核心能力：

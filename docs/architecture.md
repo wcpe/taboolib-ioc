@@ -29,6 +29,7 @@ taboolib-ioc-annotation   ← 38 个注解定义（零依赖）
 taboolib-ioc-api           ← 15 个数据类/接口（依赖 annotation）
 taboolib-ioc-core          ← 核心实现，26+ 个类（依赖 api）
 taboolib-ioc               ← 聚合打包模块
+taboolib-ioc-test          ← 对外发布的测试支撑模块
 taboolib-ioc-example       ← 示例插件
 test-v1_20 / test-v1_12    ← MC 版本集成测试
 ```
