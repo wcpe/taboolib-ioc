@@ -5,6 +5,7 @@ plugins {
     id("io.izzel.taboolib")
     id("xyz.jpenilla.run-paper")
     kotlin("jvm")
+    id("top.wcpe.taboolib.ioc")
 }
 
 
@@ -24,13 +25,10 @@ taboolib {
         install(Bukkit)
         group = "top.wcpe.ioc.example"
     }
-    relocate("top.wcpe.taboolib.ioc", "top.wcpe.ioc.example.ioc")
     subproject = false
 }
 
 dependencies {
-    taboo(project(":taboolib-ioc"))
-
     // 测试依赖 - 直接引用 ioc-core 和 ioc-api 以访问容器内部 API
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))

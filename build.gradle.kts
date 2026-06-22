@@ -6,6 +6,7 @@ plugins {
     id("io.izzel.taboolib") version "2.0.28" apply false
     id("xyz.jpenilla.run-paper") version "2.3.1" apply false
     id("dev.s7a.gradle.minecraft.server") version "4.0.2" apply false
+    id("top.wcpe.taboolib.ioc") version "0.0.6" apply false
     kotlin("jvm") version "1.9.25" apply false
 }
 
