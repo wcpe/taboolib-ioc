@@ -105,6 +105,8 @@ mcTestkit {
     backend("s1") {
         platform = paper
         version = "1.20.1"
+        // 指定非默认端口（默认 25565 易被本机其它服务占用，导致 BindException）；按模块错开避免并发撞端口
+        port = 25566
     }
     scenario("smoke") // 无 bot：仅 prepare + verify（插件桩写结果文件即 PASS）
     dependencies {
