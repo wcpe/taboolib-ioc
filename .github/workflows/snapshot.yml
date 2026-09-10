@@ -48,25 +48,65 @@ jobs:
           java-version: "21"
           distribution: "temurin"
 
-      # ── 5. 配置 Gradle（含缓存）─────────────────────────────────────────
+      # ── 5. 配置 Gradle（含 wrapper 校验 + 缓存）─────────────────────────
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # 校验 gradle-wrapper.jar 的 checksum，防止分发被篡改
+          validate-wrappers: true
 
       # ── 5.5. 修复 Linux 下 gradlew 执行权限 ─────────────────────────────
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ── 6. 构建 ──────────────────────────────────────────────────────────
-      - name: Build
+      # ── 6. 构建产物（测试由独立 test workflow 把关，此处只出产物）────────
+      - name: Build artifacts
         run: ./gradlew build -x test --no-daemon
 
-      # ── 7. 收集产物 ──────────────────────────────────────────────────────
+      # ── 7. 收集产物（含 jar 内容校验）────────────────────────────────────
       - name: Collect artifacts
         id: artifacts
         run: |
-          MAIN_JAR=$(ls taboolib-ioc-example/build/libs/*.jar | grep -v '\-sources\.\|plain\.' | head -n 1)
-          echo "main_jar=${MAIN_JAR}" >> "$GITHUB_OUTPUT"
-          echo "Found artifact: ${MAIN_JAR}"
+          set -euo pipefail
+          # 库产物：api / core / annotation 承载全部实现类；
+          # taboolib-ioc 是聚合门面（subproject=true，仅 MANIFEST + api 依赖，无 class），
+          # 已在下方按「含 .class 条目」校验后自动排除，避免发布空壳 jar。
+          # 过滤项只保留 `-sources`（withSourcesJar() 真实生效）；`-test-fixtures` / `plain`
+          # 全仓零配置，属死过滤，已删除。
+          CANDIDATES=$(ls \
+            taboolib-ioc/build/libs/*.jar \
+            taboolib-ioc-api/build/libs/*.jar \
+            taboolib-ioc-core/build/libs/*.jar \
+            taboolib-ioc-annotation/build/libs/*.jar 2>/dev/null \
+            | grep -v -E '\-sources\.' || true)
+
+          if [ -z "${CANDIDATES// /$'\n'}" ]; then
+            echo "::error::未找到任何库产物 jar，构建目录异常"
+            exit 1
+          fi
+
+          ARTIFACTS=""
+          EXCLUDED=""
+          for jar in ${CANDIDATES}; do
+            class_count=$(unzip -l "${jar}" | grep -c '\.class$' || true)
+            if [ "${class_count}" -eq 0 ]; then
+              echo "::warning::跳过空壳 jar（0 个 class 条目）：${jar}"
+              EXCLUDED="${EXCLUDED} ${jar}"
+              continue
+            fi
+            echo "OK (${class_count} classes): ${jar}"
+            ARTIFACTS="${ARTIFACTS} ${jar}"
+          done
+
+          ARTIFACTS="${ARTIFACTS# }"
+          if [ -z "${ARTIFACTS// /}" ]; then
+            echo "::error::全部候选 jar 都不含 class 条目，构建目录异常"
+            exit 1
+          fi
+          echo "artifacts=${ARTIFACTS}" >> "$GITHUB_OUTPUT"
+          echo "excluded=${EXCLUDED# }" >> "$GITHUB_OUTPUT"
+          echo "Found artifacts: ${ARTIFACTS}"
+          echo "Excluded empty jars: ${EXCLUDED# }"
 
       # ── 8. 生成更新日志（最近 20 条提交）────────────────────────────────
       - name: Generate changelog
@@ -98,6 +138,12 @@ jobs:
             else
               echo "_（无新提交）_"
             fi
+            echo ""
+            echo "## 产物说明"
+            echo ""
+            echo "- 本 SNAPSHOT 中的 jar 已逐个做内容校验，保证均含 class 条目。"
+            echo "- 实现类分布在 \`taboolib-ioc-core\` / \`taboolib-ioc-api\` / \`taboolib-ioc-annotation\`；"
+            echo "  \`taboolib-ioc\` 是聚合门面（0 个 class），不作为独立 jar 发布。"
           } > SNAPSHOT_BODY.md
 
           cat SNAPSHOT_BODY.md
@@ -112,6 +158,6 @@ jobs:
           draft: false
           prerelease: true
           # 覆盖旧产物：删掉同名文件后重新上传
-          files: ${{ steps.artifacts.outputs.main_jar }}
+          files: ${{ steps.artifacts.outputs.artifacts }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

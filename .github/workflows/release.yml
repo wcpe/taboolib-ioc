@@ -14,9 +14,38 @@ permissions:
   contents: write
 
 jobs:
+  # ── 测试门禁（独立 job）────────────────────────────────────────────────
+  # 「发版产物必须经过验证」的意图由本 job 承载：test 全绿才允许 release 启动。
+  # 与 release 解耦：任一 flaky 测试失败不会让 release job 自己跑测试而反复失败，
+  # 而是直接让发布流程不启动（fail-fast at gate）。
+  test:
+    name: Test gate (must pass before release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # 发版门禁：全量测试必须通过（失败即阻断发布）
+      - name: Run tests
+        run: ./gradlew test --continue --no-daemon
+
   build-and-release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
+    # 发布链路与测试链路解耦：release 自身不跑测试，仅依赖独立的 test 门禁 job。
+    needs: test
 
     steps:
       # ── 1. 检出完整历史（用于更新日志对比）──────────────────────────────
@@ -36,9 +65,17 @@ jobs:
           fi
           # 去掉前缀 v，得到纯版本号（如 1.2.0）
           VERSION="${TAG#v}"
-          echo "tag=${TAG}"       >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Resolved: tag=${TAG}, version=${VERSION}"
+          # 预发布语义：仅 rc / alpha / beta / m 等明确预发布标识才判定为 prerelease，
+          # 避免 v1.2.0-hotfix 这类正式补丁被误判为预发布。
+          if printf '%s' "${VERSION}" | grep -qiE '(^|[.-])(rc|alpha|beta|pre|m)[0-9]*([.-]|$)'; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=${TAG}, version=${VERSION}, prerelease=${PRERELEASE}"
 
       # ── 3. 写入构建版本号，覆盖 SNAPSHOT ────────────────────────────────
       - name: Set version in gradle.properties
@@ -53,26 +90,66 @@ jobs:
           java-version: "21"
           distribution: "temurin"
 
-      # ── 5. 配置 Gradle（含缓存）─────────────────────────────────────────
+      # ── 5. 配置 Gradle（含 wrapper 校验 + 缓存）─────────────────────────
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # 校验 gradle-wrapper.jar 的 checksum，防止分发被篡改
+          validate-wrappers: true
 
       # ── 5.5. 修复 Linux 下 gradlew 执行权限 ─────────────────────────────
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ── 6. 构建 ──────────────────────────────────────────────────────────
-      - name: Build
+      # ── 6. 构建产物（测试已由独立 test 门禁 job 把关，此处只出产物）──────
+      - name: Build artifacts
         run: ./gradlew build -x test --no-daemon
 
-      # ── 7. 收集产物 ──────────────────────────────────────────────────────
+      # ── 7. 收集产物（含 jar 内容校验）────────────────────────────────────
       - name: Collect artifacts
         id: artifacts
         run: |
-          # 主插件 JAR（排除 -sources 等附属产物）
-          MAIN_JAR=$(ls taboolib-ioc-example/build/libs/*.jar | grep -v '\-sources\.\|plain\.' | head -n 1)
-          echo "main_jar=${MAIN_JAR}" >> "$GITHUB_OUTPUT"
-          echo "Found artifact: ${MAIN_JAR}"
+          set -euo pipefail
+          # 库产物：api / core / annotation 承载全部实现类；
+          # taboolib-ioc 是聚合门面（subproject=true，仅 MANIFEST + api 依赖，无 class），
+          # 已在下方按「含 .class 条目」校验后自动排除，避免发布空壳 jar。
+          # 过滤项只保留 `-sources`（withSourcesJar() 真实生效）；`-test-fixtures` / `plain`
+          # 全仓零配置，属死过滤，已删除。
+          CANDIDATES=$(ls \
+            taboolib-ioc/build/libs/*.jar \
+            taboolib-ioc-api/build/libs/*.jar \
+            taboolib-ioc-core/build/libs/*.jar \
+            taboolib-ioc-annotation/build/libs/*.jar 2>/dev/null \
+            | grep -v -E '\-sources\.' || true)
+
+          if [ -z "${CANDIDATES// /$'\n'}" ]; then
+            echo "::error::未找到任何库产物 jar，构建目录异常"
+            exit 1
+          fi
+
+          ARTIFACTS=""
+          EXCLUDED=""
+          for jar in ${CANDIDATES}; do
+            # 统计 jar 内 .class 条目数；空壳 jar（0 class）不发布。
+            class_count=$(unzip -l "${jar}" | grep -c '\.class$' || true)
+            if [ "${class_count}" -eq 0 ]; then
+              echo "::warning::跳过空壳 jar（0 个 class 条目）：${jar}"
+              EXCLUDED="${EXCLUDED} ${jar}"
+              continue
+            fi
+            echo "OK (${class_count} classes): ${jar}"
+            ARTIFACTS="${ARTIFACTS} ${jar}"
+          done
+
+          ARTIFACTS="${ARTIFACTS# }"
+          if [ -z "${ARTIFACTS// /}" ]; then
+            echo "::error::全部候选 jar 都不含 class 条目，构建目录异常"
+            exit 1
+          fi
+          echo "artifacts=${ARTIFACTS}" >> "$GITHUB_OUTPUT"
+          echo "excluded=${EXCLUDED# }" >> "$GITHUB_OUTPUT"
+          echo "Found artifacts: ${ARTIFACTS}"
+          echo "Excluded empty jars: ${EXCLUDED# }"
 
       # ── 8. 生成更新日志 ──────────────────────────────────────────────────
       - name: Generate changelog
@@ -105,6 +182,14 @@ jobs:
             [ -n "${DOCS}" ]     && echo "### 📝 文档"        && echo "${DOCS}"     && echo ""
             [ -n "${CHORE}" ]    && echo "### 🔧 构建 / CI"  && echo "${CHORE}"    && echo ""
             [ -n "${OTHER}" ]    && echo "### 其他"           && echo "${OTHER}"    && echo ""
+            echo ""
+            echo "## 产物说明"
+            echo ""
+            echo "- 本 Release 中的 jar 已逐个做内容校验，保证均含 class 条目。"
+            echo "- \`taboolib-ioc-<版本>-sources.jar\` 为源码包，不含 class，未随 Release 发布。"
+            echo "- 实现类分布在 \`taboolib-ioc-core\` / \`taboolib-ioc-api\` / \`taboolib-ioc-annotation\`；"
+            echo "  \`taboolib-ioc\` 是聚合门面（仅 MANIFEST + 传递依赖声明，0 个 class），故不作为独立 jar 发布。"
+            echo ""
             [ -n "${PREV_TAG}" ] && echo "**完整变更**：[\`${PREV_TAG}\` → \`${{ steps.version.outputs.tag }}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ steps.version.outputs.tag }})"
           } > CHANGELOG_BODY.md
 
@@ -115,10 +200,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "AllinTreasureHunt ${{ steps.version.outputs.tag }}"
+          name: "taboolib-ioc-${{ steps.version.outputs.tag }}"
           body_path: CHANGELOG_BODY.md
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
-          files: ${{ steps.artifacts.outputs.main_jar }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          files: ${{ steps.artifacts.outputs.artifacts }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
