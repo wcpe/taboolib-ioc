@@ -15,7 +15,18 @@ object MockPluginV12 {
     @Awake(LifeCycle.ACTIVE)
     fun onActive() {
         info("Taboolib IoC TestV12 Plugin 启动")
-        showcase.runAll().forEach(::info)
+        try {
+            val lines = showcase.runAll()
+            lines.forEach(::info)
+            if (McTestkitVerdict.report(true, "ioc injection ok: ${lines.size} checks")) {
+                McTestkitVerdict.shutdownServer()
+            }
+        } catch (e: Throwable) {
+            info("[TabooLibIocTestV12] 判定失败: ${e.message}")
+            if (McTestkitVerdict.report(false, e.message ?: e.javaClass.name)) {
+                McTestkitVerdict.shutdownServer()
+            }
+        }
     }
 
     @Awake(LifeCycle.DISABLE)

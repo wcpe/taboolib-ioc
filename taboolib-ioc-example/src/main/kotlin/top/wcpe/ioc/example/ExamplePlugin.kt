@@ -17,9 +17,20 @@ object ExamplePlugin {
 
     @Awake(LifeCycle.ACTIVE)
     fun onActive() {
-        BeanContainer.registerBean("exampleManualToken", ExampleManualToken("manual-ready"))
-        info("Taboolib IoC Example Plugin 启动")
-        featureController.runAllChecks().forEach(::info)
+        try {
+            BeanContainer.registerBean("exampleManualToken", ExampleManualToken("manual-ready"))
+            info("Taboolib IoC Example Plugin 启动")
+            val lines = featureController.runAllChecks()
+            lines.forEach(::info)
+            if (McTestkitVerdict.report(true, "ioc injection ok: ${lines.size} checks")) {
+                McTestkitVerdict.shutdownServer()
+            }
+        } catch (e: Throwable) {
+            info("[TabooLibIocExample] 判定失败: ${e.message}")
+            if (McTestkitVerdict.report(false, e.message ?: e.javaClass.name)) {
+                McTestkitVerdict.shutdownServer()
+            }
+        }
     }
 
     @Awake(LifeCycle.DISABLE)
