@@ -1,5 +1,6 @@
 package top.wcpe.taboolib.ioc.scan
 
+import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.annotation.*
 import top.wcpe.taboolib.ioc.bean.*
 import top.wcpe.taboolib.ioc.util.KotlinPropertyAnnotations.findAnnotation
@@ -13,9 +14,13 @@ object ConfigurationScanner {
     /**
      * 扫描配置类中的 @Bean 方法。
      *
+     * 对返回类型为 `void` 的 `@Bean` 方法**软降级**：记录 warning 说明是配置错误并跳过该方法，
+     * 不再抛 `IllegalArgumentException`，避免在 LOAD 阶段冒泡崩掉插件 enable。
+     * 构建期的静态诊断规则 `bean-method-void-return` 仍应在编译/CI 阶段以 ERROR 提示开发者。
+     *
      * @param configClass 配置类
      * @param configBeanName 配置类自身的 Bean 名称
-     * @return @Bean 方法对应的 BeanDefinition 列表
+     * @return @Bean 方法对应的 BeanDefinition 列表（不含被跳过的 void 方法）
      */
     fun scan(configClass: Class<*>, configBeanName: String): List<BeanDefinition> {
         if (!configClass.isAnnotationPresent(Configuration::class.java)) {
@@ -24,13 +29,17 @@ object ConfigurationScanner {
 
         return configClass.declaredMethods
             .filter { it.isAnnotationPresent(Bean::class.java) }
-            .map { method ->
+            .mapNotNull { method ->
                 val beanAnnotation = method.getAnnotation(Bean::class.java)
                 val beanName = beanAnnotation.value.ifEmpty { method.name }
                 val returnType = method.returnType
 
-                require(returnType != Void.TYPE) {
-                    "@Bean 方法 ${configClass.name}.${method.name}() 返回类型不能为 void"
+                // A-P0-05：@Bean 方法返回 void 属配置错误 —— 运行期软降级（告警 + 跳过），
+                // 绝不抛异常从 LOAD 阶段的 scanAll() 冒泡崩掉插件 enable。
+                if (returnType == Void.TYPE) {
+                    warning("[IoC] 配置错误: @Bean 方法 ${configClass.name}.${method.name}() 返回类型为 void，" +
+                        "已跳过该 Bean（请为其声明非 void 返回类型）")
+                    return@mapNotNull null
                 }
 
                 // 解析工厂方法参数作为依赖

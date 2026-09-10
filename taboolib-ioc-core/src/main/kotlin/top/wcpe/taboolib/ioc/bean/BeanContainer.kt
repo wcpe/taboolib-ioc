@@ -2,6 +2,7 @@ package top.wcpe.taboolib.ioc.bean
 
 import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
+import top.wcpe.taboolib.ioc.annotation.Aspect
 import top.wcpe.taboolib.ioc.annotation.ConditionContext
 import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
@@ -37,6 +38,14 @@ object BeanContainer {
 
     private val registry = BeanRegistry()
     private val manualBeansByName = ConcurrentHashMap<String, Any>()
+
+    /**
+     * 容器初始化前通过 [registerBean] 注册的 Bean 队列（保持注册顺序）。
+     * 初始化时会按序重放完整生命周期（注入 / BeanPostProcessor / @PostConstruct / AOP / @PreDestroy 登记），
+     * 修复「初始化前注册的 Bean 永远拿不到注入与生命周期回调」的静默缺陷。
+     */
+    private val pendingManualBeans = LinkedHashMap<String, Any>()
+
     private val customScopes = ConcurrentHashMap<String, BeanScope>()
     private val cycleDetector = CycleDetector()
     private val cycleResolver = CycleResolver()
@@ -82,80 +91,146 @@ object BeanContainer {
             warning("[IoC] 容器未初始化")
             return null
         }
+        flushPendingManualBeansIfNeeded()
         return resolver.getBean(type, name)
     }
 
+    /**
+     * 获取指定类型的所有 Bean。
+     *
+     * **守卫语义（与 [getBean] 对齐，A-P1-04）**：容器未初始化且未处于初始化中时返回空列表；
+     * 在 `initializing` 期间（`initializePendingManualBeans` 重放阶段）**允许**枚举，
+     * 以便重放中的手动 Bean 能通过类型解析其依赖（与 [getBean] 的 `!initialized && !initializing` 守卫一致）。
+     */
     fun <T> getBeansOfType(type: Class<T>): List<T> {
-        if (!initialized) return emptyList()
+        if (!initialized && !initializing) return emptyList()
+        flushPendingManualBeansIfNeeded()
         return resolver.getBeansOfType(type)
     }
 
-    fun containsBean(name: String): Boolean = resolver.containsBean(name)
+    fun containsBean(name: String): Boolean {
+        flushPendingManualBeansIfNeeded()
+        return resolver.containsBean(name)
+    }
 
-    fun getBeanNames(): Set<String> = resolver.getBeanNames()
+    fun getBeanNames(): Set<String> {
+        flushPendingManualBeansIfNeeded()
+        return resolver.getBeanNames()
+    }
+
+    /**
+     * 惰性补全：若容器已可用（`initialized` 或 `initializing`）且仍有排队中的
+     * 初始化前手动 Bean，则按注册顺序补全其完整生命周期后再暴露。
+     *
+     * 这是「延迟暴露」（A-P0-02）与「注册后即可使用」之间的桥梁：
+     * - 真正常规路径下，[initialize] 会在创建扫描 Bean 之前清空队列；
+     * - 若外部代码（或测试）在未调用 [initialize] 的情况下直接置位 `initialized` 并查询，
+     *   这里会**先补全生命周期再暴露**，绝不会暴露未初始化的裸实例。
+     */
+    private fun flushPendingManualBeansIfNeeded() {
+        if (!initialized && !initializing) return
+        if (pendingManualBeans.isEmpty()) return
+        initializePendingManualBeans()
+    }
 
     /**
      * 手动注册 Bean 实例。
-     * 
+     *
      * 注册的 Bean 会经过完整的生命周期处理：
      * - 属性注入（@Inject 字段和方法）
      * - BeanPostProcessor 回调
      * - @PostConstruct 回调
      * - AOP 代理包装
      * - @PreDestroy 回调（容器关闭时）
-     * 
+     *
+     * 若在容器初始化（ENABLE）之前调用，实例会先进入 [pendingManualBeans] 队列，
+     * [initialize] 时按注册顺序重放上述完整生命周期。
+     *
+     * **延迟暴露（A-P0-02）**：初始化前注册的实例**不会**被提前写入
+     * `manualBeansByName` / `cycleResolver`。因为初始化前 `getBean` 本就返回 null
+     * （见 [getBean] 的守卫），提前暴露对「初始化前解析」没有任何收益，却会让
+     * 未注入、未执行 @PostConstruct 的**裸半成品**在 `initializing` 窗口内被
+     * 依赖方命中（静默注入半成品）。因此统一改为「初始化时按注册顺序补全后再暴露」。
+     *
+     * **注册顺序约束**：重放时若 A 先于其依赖的 B 注册，则补全 A 时 B 尚未暴露，
+     * 会**显式失败**（而非静默注入 B 的裸实例）—— 这是确定性的、可诊断的行为。
+     * 需要 A 依赖 B 时，请先 `registerBean` B 再 `registerBean` A。
+     *
      * @param name Bean 名称
      * @param instance Bean 实例
      */
     fun registerBean(name: String, instance: Any) {
         if (!initialized && !initializing) {
-            // 容器未初始化时，直接存储，等待容器初始化后处理
-            manualBeansByName[name] = instance
-            cycleResolver.addSingleton(name, instance)
-            debug("[IoC] 手动注册 Bean（待处理）: $name")
+            // 容器未初始化：仅入队，不提前暴露（延迟暴露，消除半成品可见窗口）
+            synchronized(pendingManualBeans) { pendingManualBeans[name] = instance }
+            debug("[IoC] 手动注册 Bean（已排队，初始化时补全生命周期）: $name")
             return
         }
+        registerBeanWithFullLifecycle(name, instance)
+    }
 
-        // 容器已初始化，执行完整生命周期
-        val definition = createManualBeanDefinition(name, instance)
-        registry.register(definition)
-        
+    /**
+     * 阶段 1：把初始化前注册的手动 Bean 的 **BeanDefinition** 登记进注册表（不执行生命周期）。
+     *
+     * 必须在 `initializeAspects()` / `discoverBeanPostProcessors()` 之前调用，
+     * 否则手动注册的 @Aspect / BeanPostProcessor 在发现阶段不可见（A-P0-01）。
+     *
+     * 已缓存的实例（例如被更早解析命中）会被跳过，避免重复登记。
+     */
+    private fun registerPendingManualBeanDefinitions() {
+        val pending = synchronized(pendingManualBeans) {
+            val copy = pendingManualBeans.toList()
+            copy
+        }
+        if (pending.isEmpty()) return
+        for ((name, instance) in pending) {
+            if (registry.contains(name)) continue
+            registry.register(createManualBeanDefinition(name, instance))
+        }
+        debug("[IoC] 已登记 ${pending.size} 个初始化前注册 Bean 的定义: ${pending.joinToString(", ") { it.first }}")
+    }
+
+    /**
+     * 阶段 2：补全初始化前注册 Bean 的完整生命周期（注入 / BPP / @PostConstruct / AOP）。
+     *
+     * 必须在 `discoverBeanPostProcessors()` 之后、`lifecycleManager.initialize()` 之前执行，
+     * 使扫描 Bean 的注入能命中已补全生命周期的手动 Bean。
+     */
+    private fun initializePendingManualBeans() {
+        val pending = synchronized(pendingManualBeans) {
+            val copy = pendingManualBeans.toList()
+            pendingManualBeans.clear()
+            copy
+        }
+        if (pending.isEmpty()) return
+        debug("[IoC] 开始补全 ${pending.size} 个初始化前注册 Bean 的生命周期: ${pending.joinToString(", ") { it.first }}")
+        for ((name, instance) in pending) {
+            registerBeanWithFullLifecycle(name, instance)
+        }
+    }
+
+    /**
+     * 执行完整生命周期并缓存：注入 → BeanPostProcessor → @PostConstruct → AOP 包装 → 缓存。
+     *
+     * 实例化已由调用方完成（手动注册），因此委托给
+     * [LifecycleManager.registerExistingSingleton]，**同样进入环检测门**
+     * （A-P1-03），使手动 Bean 之间的循环依赖能被显式检测。
+     */
+    private fun registerBeanWithFullLifecycle(name: String, instance: Any) {
+        // 定义可能已在阶段 1 登记；若未登记（初始化后调用 registerBean）则补登记
+        val definition = registry.getByName(name) ?: createManualBeanDefinition(name, instance)
+        if (!registry.contains(name)) {
+            registry.register(definition)
+        }
+
         try {
-            // 执行属性注入
-            injector.populate(instance, definition)
-            
-            // BeanPostProcessor — before initialization
-            var processedInstance = instance
-            for (processor in lifecycleManager.getBeanPostProcessors()) {
-                processedInstance = processor.postProcessBeforeInitialization(processedInstance, name)
-            }
-            
-            // 执行 @PostConstruct 回调
-            injector.invokePostConstruct(processedInstance, definition)
-            
-            // BeanPostProcessor — after initialization
-            for (processor in lifecycleManager.getBeanPostProcessors()) {
-                processedInstance = processor.postProcessAfterInitialization(processedInstance, name)
-            }
-            
-            // AOP 代理包装
-            val finalInstance = if (aopProxyFactory != null) {
-                val proxy = aopProxyFactory.wrapIfNecessary(processedInstance, definition.type)
-                if (proxy !== processedInstance) {
-                    debug("[IoC] 手动注册的 Bean 已包装 AOP 代理: $name")
-                }
-                proxy
-            } else {
-                processedInstance
-            }
-            
-            // 缓存到容器
+            // 交给 LifecycleManager 执行注入 / BPP / @PostConstruct / AOP，并缓存到 cycleResolver
+            lifecycleManager.registerExistingSingleton(definition, instance)
+
+            // 缓存到手动 Bean 名称索引
+            val finalInstance = cycleResolver.getSingleton(name) ?: instance
             manualBeansByName[name] = finalInstance
-            cycleResolver.addSingleton(name, finalInstance)
-            
-            // 记录初始化顺序（用于 @PreDestroy）
-            lifecycleManager.recordInitialization(name)
-            
+
             debug("[IoC] 手动注册 Bean（已完成生命周期）: $name")
         } catch (e: Exception) {
             registry.remove(name)
@@ -212,7 +287,11 @@ object BeanContainer {
             dependencies = dependencies,
             lazyInit = false,
             scope = BeanScopes.SINGLETON,
-            isAspect = false,
+            // A-P0-01：手动注册路径必须与扫描路径同源判定 @Aspect，
+            // 否则手动注册的切面其 Advisor 永远不被注册（通知静默失效），
+            // 且会被自我代理（宽切点下递归 → StackOverflowError）。
+            // 判据与 scan/ClassScanner.kt:22 逐字一致：clazz.isAnnotationPresent(Aspect::class.java)。
+            isAspect = clazz.isAnnotationPresent(Aspect::class.java),
             isPrimary = false,
             order = Int.MAX_VALUE,
             valueFields = valueFields,
@@ -277,11 +356,19 @@ object BeanContainer {
 
             initializing = true
             try {
-                // 先初始化切面 Bean 并解析 Advisor
+                // 1) 先把初始化前注册的 Bean 定义登记进注册表（**不**执行生命周期）。
+                //    必须在 initializeAspects / discoverBeanPostProcessors 之前，
+                //    否则手动注册的 @Aspect（isAspect=true）与 BeanPostProcessor
+                //    在发现阶段不可见 → 切面通知静默失效（A-P0-01）。
+                registerPendingManualBeanDefinitions()
+                // 2) 初始化切面 Bean 并解析 Advisor（此时手动切面已在注册表中）
                 initializeAspects()
-                // 发现并注册 BeanPostProcessor
+                // 3) 发现并注册 BeanPostProcessor（此时手动 BPP 已在注册表中）
                 discoverBeanPostProcessors()
-                // 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
+                // 4) 补全初始化前注册 Bean 的完整生命周期（注入 / BPP / @PostConstruct / AOP），
+                //    必须在 lifecycleManager.initialize() 之前，使扫描 Bean 的注入能命中这些手动 Bean。
+                initializePendingManualBeans()
+                // 5) 再初始化所有 Bean（切面 Bean 已缓存，不会重复创建）
                 lifecycleManager.initialize()
                 initialized = true
             } finally {
@@ -294,6 +381,24 @@ object BeanContainer {
     }
 
     /**
+     * 解析一个 Bean 定义对应的实例，供切面 / BeanPostProcessor 发现阶段使用。
+     *
+     * - 若该定义对应一个**初始化前手动注册**的实例（定义由 [registerPendingManualBeanDefinitions]
+     *   登记、实例仍在 [pendingManualBeans] 中），则先补全其完整生命周期并返回同一实例，
+     *   避免 `createBean` 因 `constructor == null` 而失败（A-P0-01）。
+     * - 否则走正常的 `getOrCreateSingleton` 创建流程。
+     */
+    private fun resolveExistingOrCreate(definition: BeanDefinition): Any {
+        val manualInstance = synchronized(pendingManualBeans) { pendingManualBeans[definition.name] }
+        if (manualInstance != null) {
+            // 复用「手动注册 Bean 完整生命周期」路径（含环检测门），并返回最终实例
+            registerBeanWithFullLifecycle(definition.name, manualInstance)
+            return cycleResolver.getSingleton(definition.name) ?: manualInstance
+        }
+        return lifecycleManager.getOrCreateSingleton(definition)
+    }
+
+    /**
      * 初始化切面 Bean 并解析 Advisor。
      */
     private fun initializeAspects() {
@@ -302,7 +407,7 @@ object BeanContainer {
 
         debug("[IoC] 发现 ${aspectDefinitions.size} 个切面，开始解析")
         for (definition in aspectDefinitions) {
-            val aspectInstance = lifecycleManager.getOrCreateSingleton(definition)
+            val aspectInstance = resolveExistingOrCreate(definition)
             val advisors = AspectScanner.scan(aspectInstance, definition.type)
             advisorRegistry.registerAll(advisors)
             debug("[IoC] 切面 ${definition.name} 解析完成，共 ${advisors.size} 个通知器")
@@ -321,7 +426,7 @@ object BeanContainer {
 
         debug("[IoC] 发现 ${processorDefinitions.size} 个 BeanPostProcessor，开始注册")
         for (definition in processorDefinitions) {
-            val processor = lifecycleManager.getOrCreateSingleton(definition)
+            val processor = resolveExistingOrCreate(definition)
             if (processor is BeanPostProcessor) {
                 lifecycleManager.addBeanPostProcessor(processor)
                 debug("[IoC] 注册 BeanPostProcessor: ${definition.name}")
@@ -344,6 +449,7 @@ object BeanContainer {
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
+        synchronized(pendingManualBeans) { pendingManualBeans.clear() }
         lifecycleManager.eventBus.clear()
         ValueResolver.clearProperties()
         initialized = false
@@ -376,6 +482,9 @@ object BeanContainer {
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
+        synchronized(pendingManualBeans) { pendingManualBeans.clear() }
+        // A-P1-05：与 shutdown 语义一致地清理事件总线，避免监听器跨 reset 周期累积泄漏
+        lifecycleManager.eventBus.clear()
         ValueResolver.clearProperties()
         initialized = false
         initializing = false
@@ -392,8 +501,13 @@ object BeanContainer {
 
     private fun clearScopes() {
         customScopes.values.forEach { scope ->
-            runCatching { scope.clear() }
-                .onFailure { warning("[IoC] 清理自定义作用域失败: ${it.message}") }
+            runCatching {
+                scope.clear()
+                // ThreadBeanScope 需要跨线程清理：clear() 只能清当前线程，
+                // 池化线程持有的缓存实例必须在此一次性断开引用，
+                // 否则插件重载后旧 ClassLoader 无法回收
+                if (scope is ThreadBeanScope) scope.clearAllThreads()
+            }.onFailure { warning("[IoC] 清理自定义作用域失败: ${it.message}") }
         }
         customScopes.clear()
     }
