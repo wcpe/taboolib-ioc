@@ -3,9 +3,8 @@ import io.izzel.taboolib.gradle.*
 plugins {
     java
     `maven-publish`
-    id("io.izzel.taboolib") version "2.0.28" apply false
-    id("xyz.jpenilla.run-paper") version "2.3.1" apply false
-    id("dev.s7a.gradle.minecraft.server") version "4.0.2" apply false
+    id("io.izzel.taboolib") version "2.0.38-wcpe.1" apply false
+    id("top.wcpe.mc-testkit") version "0.8.0" apply false
     id("top.wcpe.taboolib.ioc") version "0.0.6" apply false
     kotlin("jvm") version "1.9.25" apply false
 }
@@ -24,8 +23,12 @@ subprojects {
     }
 
     repositories {
-        mavenLocal()
+        // 顺序敏感：可达全量镜像前置，其次 wcpe 私有 releases（2.0.38-wcpe.1 与
+        // mc-testkit 0.8.0 只在 releases，public 未聚合），最后 mavenLocal / central 兜底。
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.wcpe.top/repository/maven-releases/")
         maven("https://maven.wcpe.top/repository/maven-public/")
+        mavenLocal()
         mavenCentral()
         maven("https://repo.tabooproject.org/repository/releases")
     }
