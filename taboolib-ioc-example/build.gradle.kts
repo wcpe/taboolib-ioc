@@ -54,12 +54,10 @@ tasks.matching { it.name.startsWith("publish") }.configureEach {
 // ---------------------------------------------------------------------------
 // mc-testkit 起服验证（取代旧的行内 Paper 起服任务）
 // 后端版本取 1.20.1（mc-testkit 代表版本，不含原 1.20.4）。
-// pluginUnderTest 采用「双轨」：env 覆盖优先，缺省回退本模块产物绝对路径。
+// 自测模式（mc-testkit 0.9.0+）：未声明 pluginUnderTest 时框架自动取本模块 jar 产物
+// （build/libs/<name>-<version>.jar），并把 prepareE2eSmoke / e2eSmoke 自动依赖到 jar 任务；
+// 运行期仍可用 MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR 覆盖（CI / GradleRunner 注入）。
 // ---------------------------------------------------------------------------
-val pluginUnderTestJarPath: String = layout.buildDirectory
-    .file("libs/${project.name}-${project.version}.jar")
-    .get().asFile.absolutePath
-
 mcTestkit {
     backend("s1") {
         platform = paper
@@ -68,18 +66,4 @@ mcTestkit {
         port = 25568
     }
     scenario("smoke")
-    dependencies {
-        pluginUnderTest = System.getenv("MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR")
-            ?.takeIf { it.isNotBlank() } ?: pluginUnderTestJarPath
-    }
-}
-
-// 保证先产出被注入的插件 jar。
-// 注意：mc-testkit 的任务在 afterEvaluate 中注册，故此处不能用 tasks.named("e2eSmoke")（配置期尚不存在），
-// 改用 tasks.matching{}.configureEach{} 惰性挂钩，待任务注册/实现时再追加依赖。
-// prepareE2eSmoke 会做前置校验（被测插件 jar 必须已存在），故它与 e2eSmoke 都必须依赖
-// 产出插件 jar 的 `jar` 任务。**不能只依赖 taboolibMainTask**——它只是 `jar` 的 finalizer，
-// 单独调度时不会带上 `jar`，反而会因 inJar 不存在而失败（CI 全新检出时即暴露此问题）。
-tasks.matching { it.name == "e2eSmoke" || it.name == "prepareE2eSmoke" }.configureEach {
-    dependsOn("jar")
 }

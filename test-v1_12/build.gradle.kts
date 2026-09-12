@@ -68,20 +68,12 @@ tasks.matching { it.name.startsWith("publish") }.configureEach {
 // ---------------------------------------------------------------------------
 // mc-testkit 起服验证（取代旧的行内 Paper 起服任务与 Spigot 手写起服任务）
 // 判定真源 = 结果文件 build/mc-testkit/results/smoke.properties 的 status=PASS。
-// 1.12.2 的 Spigot 服务端由 mc-testkit 内置下载承担（下载源 getbukkit，可经
-// MC_TESTKIT_E2E_SPIGOT_JAR 预置覆盖）。
+// 1.12.2 的 Spigot 服务端由 mc-testkit 内置下载承担（主源 getbukkit 已失效时自动回退
+// GitHub 镜像，可经 MC_TESTKIT_E2E_SPIGOT_JAR 预置覆盖）。
+// 自测模式（mc-testkit 0.9.0+）：未声明 pluginUnderTest 时框架自动取本模块 jar 产物
+// （build/libs/<name>-<version>.jar），并把 prepareE2eSmoke / e2eSmoke 自动依赖到 jar 任务；
+// 运行期仍可用 MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR 覆盖（CI / GradleRunner 注入）。
 // ---------------------------------------------------------------------------
-//
-// pluginUnderTest 取值采用「双轨」：
-//   - 优先读环境变量 MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR（CI / 外部覆盖，绝对路径）；
-//   - 缺省回退到本模块 taboolibMainTask 产物的绝对路径（本地直接 `gradlew :test-v1_12:e2eSmoke` 即可跑）。
-// 实测确认产物规则 = <module>/build/libs/<project.name>-<project.version>.jar
-//   （本项目实测为 test-v1_12/build/libs/test-v1_12-1.2.0.jar）。
-// pluginUnderTest 的解析发生在 prepare 任务的 doLast（执行期），配置期求值绝对路径不会触发早期校验失败。
-val pluginUnderTestJarPath: String = layout.buildDirectory
-    .file("libs/${project.name}-${project.version}.jar")
-    .get().asFile.absolutePath
-
 mcTestkit {
     backend("s1") {
         platform = spigot
@@ -89,19 +81,5 @@ mcTestkit {
         // 指定非默认端口（默认 25565 易被本机其它服务占用，导致 BindException）；按模块错开避免并发撞端口
         port = 25567
     }
-    scenario("smoke") // 无 bot：仅 prepare + verify（插件桩写结果文件即 PASS）
-    dependencies {
-        pluginUnderTest = System.getenv("MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR")
-            ?.takeIf { it.isNotBlank() } ?: pluginUnderTestJarPath
-    }
-}
-
-// 保证先产出被注入的插件 jar。
-// 注意：mc-testkit 的任务在 afterEvaluate 中注册，故此处不能用 tasks.named("e2eSmoke")（配置期尚不存在），
-// 改用 tasks.matching{}.configureEach{} 惰性挂钩，待任务注册/实现时再追加依赖。
-// prepareE2eSmoke 会做前置校验（被测插件 jar 必须已存在），故它与 e2eSmoke 都必须依赖
-// 产出插件 jar 的 `jar` 任务。**不能只依赖 taboolibMainTask**——它只是 `jar` 的 finalizer，
-// 单独调度时不会带上 `jar`，反而会因 inJar 不存在而失败（CI 全新检出时即暴露此问题）。
-tasks.matching { it.name == "e2eSmoke" || it.name == "prepareE2eSmoke" }.configureEach {
-    dependsOn("jar")
+    scenario("smoke")
 }
