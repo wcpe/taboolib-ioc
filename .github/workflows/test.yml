@@ -13,8 +13,14 @@ permissions:
   pull-requests: write
 
 jobs:
-  test:
-    name: Run all tests
+  # ── 构建 + 单元/集成测试 ────────────────────────────────────────────────
+  # push（全分支）与 PR 都必须「既构建又测试」。
+  # 说明：Gradle 的 `build` = `assemble`（产出 jar）+ `check`，而 `check` 已包含
+  # `test`，因此单条 `./gradlew build` 就同时完成了构建与全量测试；无需再显式追加
+  # `test`（追加只是重复声明同一任务依赖）。`--continue` 保证单个模块失败不会中断
+  # 其它模块，便于一次性拿到全部结果。
+  build-and-test:
+    name: Build & run all tests
     runs-on: ubuntu-latest
 
     steps:
@@ -33,9 +39,9 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # 运行全量测试，失败也继续其它模块
-      - name: Run tests
-        run: ./gradlew test --continue --no-daemon
+      # 构建 + 测试一步到位：build 覆盖 assemble(jar) 与 check(test)
+      - name: Build and test
+        run: ./gradlew build --continue --no-daemon
 
       # 聚合 JUnit XML，写入 Step Summary 与 markdown
       - name: Generate test report
@@ -75,30 +81,52 @@ jobs:
           check_name: "Test Results"
           comment_mode: off
 
-  server-smoke:
-    name: Real server smoke (${{ matrix.label }})
+  # ── mc-testkit 真实起服烟雾测试 ─────────────────────────────────────────
+  # 取代旧的 server 起服烟雾 job（其依赖的 Paper v2 下载 API 已 HTTP 410 下线，
+  # 必然失败；且其写死 1.20.4，而项目已改用 mc-testkit 后端 1.20.1）。
+  # 判定真源：<module>/build/mc-testkit/results/smoke.properties 的 status=PASS。
+  #
+  # 运行期 JVM 选择（依据 mc-testkit 0.8.0 `JavaRuntimeSelector`，已反编译实证）：
+  #   后端服务端 JVM = 环境变量 MC_TESTKIT_JAVA_HOME_<版本段> > JAVA_HOME > 当前 JVM；
+  #   版本段 = 版本号「前两段」以 "_" 连接（"1.20.1"→"1_20"，"1.12.2"→"1_12"）。
+  #   • Spigot 1.12.2：**实测 Java 8 会失败**——服务端能起，但 IoC 扫描在 Java 8 抛
+  #     ArrayStoreException: AnnotationTypeMismatchExceptionProxy（ComponentScanPackages.resolve），
+  #     注入未完成 → 判定 FAIL；Java 17 / Java 21 均 PASS。故固定用 JDK 17 启动该后端
+  #     （旧 Spigot + 最新 JDK 组合不确定性更大，取更稳的 17）。
+  #   • Paper 1.20.1：Java 21 通过 → 注入 MC_TESTKIT_JAVA_HOME_1_20 = JDK 21。
+  # 注意：Gradle 自身（构建插件 jar，含 target=21 的 test-v1_20）必须跑在 JDK 21，
+  # 故先安装 JDK 17、后安装 JDK 21，使 JAVA_HOME 落在 21；仅通过上述变量把 JDK 17
+  # 定向给 1.12.2 服务端，其余后端走 JAVA_HOME(21)。
+  e2e-smoke:
+    name: mc-testkit smoke (${{ matrix.label }})
     runs-on: ubuntu-latest
-    needs: test
+    needs: build-and-test
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: "1.20.4 (Paper)"
+          - label: "1.20.1 (Paper)"
             module: test-v1_20
-            mc_version: "1.20.4"
-            java: "21"
-            expect: "[TabooLibIocTestV20] 启动"
           - label: "1.12.2 (Spigot)"
             module: test-v1_12
-            mc_version: "1.12.2"
-            java: "8"
-            expect: "Taboolib IoC TestV12 Plugin 启动"
+          - label: "1.20.1 (Paper, example)"
+            module: taboolib-ioc-example
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 构建插件 jar 用 JDK 21（全项目源码级别要求 21 才能跑 taboolib gradle 插件）
-      - name: Setup build JDK 21
+      # 先装 JDK 17（供 Spigot 1.12.2 服务端运行时；Java 8 会导致 IoC 注入失败，见上方注释）
+      - name: Setup JDK 17
+        id: jdk17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      # 后装 JDK 21（供 Gradle 构建；最后安装者即为 JAVA_HOME）
+      - name: Setup JDK 21
+        id: jdk21
         uses: actions/setup-java@v4
         with:
           java-version: "21"
@@ -110,65 +138,64 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build plugin jar
-        run: ./gradlew :${{ matrix.module }}:assemble --no-daemon
-
-      - name: Locate plugin jar
-        id: jar
-        run: |
-          jar=$(ls ${{ matrix.module }}/build/libs/*.jar | grep -v -E '(sources|plain)' | head -n1)
-          echo "path=$(realpath "$jar")" >> "$GITHUB_OUTPUT"
-          echo "[ci] plugin jar: $jar"
-
-      # 1.12.2 必须用 Java 8 跑；1.20.4 用 Java 21。
-      - name: Setup runtime JDK
-        uses: actions/setup-java@v4
-        id: runtime-jdk
-        with:
-          java-version: ${{ matrix.java }}
-          distribution: "temurin"
-
-      - name: Run server smoke
+      - name: Run mc-testkit smoke
         env:
-          JAVA_BIN: ${{ steps.runtime-jdk.outputs.path }}/bin/java
-          LOG_DIR: ${{ runner.temp }}/smoke-logs
-        run: |
-          chmod +x .github/scripts/server-smoke.sh
-          mkdir -p "$LOG_DIR"
-          .github/scripts/server-smoke.sh \
-            "${{ matrix.mc_version }}" \
-            "${{ steps.jar.outputs.path }}" \
-            "${{ matrix.expect }}" \
-            300
+          MC_TESTKIT_JAVA_HOME_1_12: ${{ steps.jdk17.outputs.path }}
+          MC_TESTKIT_JAVA_HOME_1_20: ${{ steps.jdk21.outputs.path }}
+        run: ./gradlew :${{ matrix.module }}:e2eSmoke --no-daemon --stacktrace
 
-      - name: Upload server log
+      # 把结果文件与 s1.log 尾部写入 Step Summary，便于排障
+      - name: Summarize smoke result
+        if: always()
+        run: |
+          RESULT_FILE="${{ matrix.module }}/build/mc-testkit/results/smoke.properties"
+          {
+            echo "### mc-testkit smoke — ${{ matrix.label }}"
+            echo ""
+            echo "- 模块：\`${{ matrix.module }}\`"
+            echo "- 结果文件：\`${RESULT_FILE}\`"
+            echo ""
+            if [ -f "${RESULT_FILE}" ]; then
+              echo '```properties'
+              cat "${RESULT_FILE}"
+              echo '```'
+            else
+              echo "> ⚠️ 未找到结果文件（构建或起服可能未完成）。"
+            fi
+            echo ""
+            echo "<details><summary>s1.log 尾部 120 行</summary>"
+            echo ""
+            echo '```'
+            tail -n 120 "${{ matrix.module }}/build/mc-testkit/run/s1.log" 2>/dev/null || echo "(无 s1.log)"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 以结果文件为唯一判定真源：status 必须为 PASS
+      - name: Assert smoke status is PASS
+        if: always()
+        run: |
+          RESULT_FILE="${{ matrix.module }}/build/mc-testkit/results/smoke.properties"
+          if [ ! -f "${RESULT_FILE}" ]; then
+            echo "::error::未生成结果文件：${RESULT_FILE}"
+            exit 1
+          fi
+          status=$(sed -n 's/^status=//p' "${RESULT_FILE}" | tr -d '\r' | head -n1)
+          echo "[smoke] status=${status}"
+          if [ "${status}" != "PASS" ]; then
+            echo "::error::smoke status=${status}，期望 PASS"
+            exit 1
+          fi
+          echo "[smoke] status=PASS ✓"
+
+      - name: Upload mc-testkit artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: server-log-${{ matrix.mc_version }}
-          path: ${{ runner.temp }}/smoke-logs/*
+          name: mc-testkit-${{ matrix.module }}
+          path: |
+            ${{ matrix.module }}/build/mc-testkit/results/*.properties
+            ${{ matrix.module }}/build/mc-testkit/run/*.log
+            ${{ matrix.module }}/build/mc-testkit/run/logs/**
           if-no-files-found: warn
-
-      - name: Append smoke summary
-        if: always()
-        run: |
-          status="${{ job.status }}"
-          emoji="✅"; [ "$status" != "success" ] && emoji="❌"
-          {
-            echo "### $emoji 真实服务器烟雾测试 — ${{ matrix.label }}"
-            echo ""
-            echo "- 模块：\`${{ matrix.module }}\`"
-            echo "- MC 版本：\`${{ matrix.mc_version }}\`"
-            echo "- 期望日志：\`${{ matrix.expect }}\`"
-            echo "- 结果：**$status**"
-            echo ""
-            if [ -f "${{ runner.temp }}/smoke-logs/server-${{ matrix.mc_version }}.log" ]; then
-              echo "<details><summary>server.log 尾部 80 行</summary>"
-              echo ""
-              echo '```'
-              tail -n 80 "${{ runner.temp }}/smoke-logs/server-${{ matrix.mc_version }}.log"
-              echo '```'
-              echo ""
-              echo "</details>"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
