@@ -99,6 +99,9 @@ mcTestkit {
 // 保证先产出被注入的插件 jar。
 // 注意：mc-testkit 的任务在 afterEvaluate 中注册，故此处不能用 tasks.named("e2eSmoke")（配置期尚不存在），
 // 改用 tasks.matching{}.configureEach{} 惰性挂钩，待任务注册/实现时再追加依赖。
-tasks.matching { it.name == "e2eSmoke" }.configureEach {
-    dependsOn("taboolibMainTask")
+// prepareE2eSmoke 会做前置校验（被测插件 jar 必须已存在），故它与 e2eSmoke 都必须依赖
+// 产出插件 jar 的 `jar` 任务。**不能只依赖 taboolibMainTask**——它只是 `jar` 的 finalizer，
+// 单独调度时不会带上 `jar`，反而会因 inJar 不存在而失败（CI 全新检出时即暴露此问题）。
+tasks.matching { it.name == "e2eSmoke" || it.name == "prepareE2eSmoke" }.configureEach {
+    dependsOn("jar")
 }
