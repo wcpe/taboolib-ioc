@@ -59,9 +59,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ── 6. 构建产物（测试由独立 test workflow 把关，此处只出产物）────────
-      - name: Build artifacts
-        run: ./gradlew build -x test --no-daemon
+      # ── 6. 构建 + 测试（main/master 推送同样必须既构建又测试）────────────
+      # 去掉旧版的 `-x test`：SNAPSHOT 也应当经过测试门禁后才产物，避免把
+      # 未通过测试的提交打成快照。`build` = assemble(jar) + check(test)。
+      # 选中在 snapshot 内自跑测试（而非依赖 test.yml 的结果）的理由：GitHub
+      # Actions 的跨 workflow「依赖另一 workflow 的 job」并无原生支持，需改用
+      # workflow_run 事件或 reusable workflow，会引入额外的触发时序与权限复杂度；
+      # 在本 workflow 内自跑一遍最简单、最可控，代价仅为一次额外构建。
+      - name: Build and test
+        run: ./gradlew build --no-daemon
 
       # ── 7. 收集产物（含 jar 内容校验）────────────────────────────────────
       - name: Collect artifacts
