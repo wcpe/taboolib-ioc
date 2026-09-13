@@ -5,6 +5,33 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0] - 2026-09-13
+
+### 新增
+
+- AOP 静态诊断规则组（配套 Gradle 插件）：`pointcut-target-not-found`、`aop-private-method-pointcut`、`aop-static-method-pointcut`、`aop-target-not-proxied`、`aop-factory-bean-interface-return`、`advice-signature-invalid`
+
+### 修复
+
+- **AOP 具体类注入点不再静默 `null`**：切面命中未实现接口的具体类时，`@Lazy` 具体类回退补齐 `required` 语义并抛出与普通 `@Inject` 一致的异常；目标类型因代理而类型不匹配时给出「`@Lazy` 仅支持接口类型」的明确指引
+- 容器初始化前手动注册的 Bean 不再以未注入裸实例提前暴露（改为入队，容器可用时先补全生命周期再暴露），消除半成品注入窗口
+- 生命周期管理器：收窄 `getOrCreateSingleton` 全局锁持锁范围，锁内只做环检测登记与实例化，`@PostConstruct` / AOP 等用户代码移到锁外，消除主线程被串行化与多线程死锁
+- 线程作用域：`ThreadBeanScope` 移除 fastPath 双结构、改单 registry 并在同一临界区完成读写，与 `clearAllThreads` 线性化，消除线程池复用线程场景下的 TOCTOU 逃逸 / 泄漏窗口（保留 `WeakHashMap` 弱引用语义）
+- 扫描层：修复硬编码 `Class.forName("taboolib.common.io.ProjectScannerKt")` 在 Gradle 插件 relocate 后静默失效的问题，改用编译期锚点 `LifeCycle` 推导运行时包名，所有失败路径软降级（告警 + 返回空列表）
+- 多 `@Inject` 构造器改为实例化期按确定性顺序逐个尝试解析，全部失败才抛出并列出各候选失败原因（此前仅取静态期首选构造器）
+- 手动注册的 `@Aspect` 的 `isAspect` 由硬编码 `false` 改为按实例类判定，修复手动切面通知 100% 静默失效
+- AOP：切点表达式解析失败不再冒泡（仅跳过该通知并告警）、通知方法签名扫描期校验、切点仅命中 `static` 方法时告警
+- `@Bean` 方法返回 `void` 由抛异常改为告警 + 跳过；`getBeansOfType` 守卫与 `getBean` 对齐；`resetForTesting` 补清 `eventBus` 与 `pendingManualBeans`
+- 3 个 Kotlin 元数据缺陷（`$annotations` 载体被 `ACC_SYNTHETIC` 一刀切过滤、含 `$` 的嵌套类被整体跳过、`companion object` 注入点跨类不可见）导致静态规则召回率减半，均已修复（配套 Gradle 插件）
+
+### 变更
+
+- `io.izzel.taboolib` 统一至 `2.0.38-wcpe.1`
+- E2E 从 run-paper 迁移到 mc-testkit（0.9.0 自测模式），三模块（`test-v1_20` / `test-v1_12` / `taboolib-ioc-example`）真机起服验证，判定真源为结果文件 `build/mc-testkit/results/smoke.properties` 的 `status=PASS`
+- CI 改为 push（全分支）/ PR 即构建 + 测试，并修复失效的起服验证（改用 mc-testkit `e2eSmoke` 矩阵）；发版流水线新增独立测试门禁、排除空壳产物、修正资产命名与 prerelease 判据
+- 依赖仓库顺序调整并补充本地代理直连名单（`nonProxyHosts`）
+- 重写两处伪测试（`CompanionObjectInjectorTest` / `ObjectInjectorTest`）并补齐缺陷回归用例，core 287 tests 全绿
+
 ## [1.1.0] - 2026-03-14
 
 ### 新增

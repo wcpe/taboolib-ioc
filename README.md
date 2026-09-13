@@ -2,7 +2,7 @@
 
 为 TabooLib Bukkit 插件场景提供的轻量 IoC 容器。
 
-[![版本](https://img.shields.io/badge/版本-1.1.0-blue)](CHANGELOG.md)
+[![版本](https://img.shields.io/badge/版本-1.3.0-blue)](CHANGELOG.md)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.25-orange)](https://kotlinlang.org)
 [![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
 
@@ -66,7 +66,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.3.0")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突
