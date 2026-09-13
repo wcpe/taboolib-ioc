@@ -372,6 +372,8 @@ class LoggingAspect {
 - `execution(类名.*)` — 匹配类的所有方法
 
 > 注意：AOP 代理基于 JDK 动态代理，目标 Bean 必须实现接口才能被代理。`@Aspect` 类会自动注册为组件，无需额外标记 `@Component`。
+>
+> 从本版本起，切面命中**未实现接口的具体类**时不再静默返回 `null`：`@Lazy` 具体类回退会补齐 `required` 语义并抛出与普通 `@Inject` 一致的异常；若目标类型因代理而类型不匹配，会给出「`@Lazy` 仅支持接口类型」的明确指引。此外，切点表达式非法只跳过该条通知并告警，不再冒泡导致插件 `enable` 失败；切点仅命中 `static` 方法时也会告警（JDK 代理只承载接口实例方法）。
 
 ### 9. 条件装配
 
@@ -701,6 +703,19 @@ constructorCycleDetection=exampleConstructorCycleLeft -> exampleConstructorCycle
 ExampleReportService 销毁前回调
 ```
 
+## 编译期静态诊断
+
+配合 `top.wcpe.taboolib.ioc` Gradle 插件，本容器可在**编译期**对注入点与切面做静态校验，把运行时才会暴露的问题提前拦在构建阶段。除既有的缺失 Bean、类型不兼容、多 `@Primary` 等规则外，本版本新增 **AOP 静态诊断规则组**：
+
+- `pointcut-target-not-found`：切点目标类/方法在扫描范围内不存在（WARNING）
+- `aop-private-method-pointcut`：切点仅命中 private 方法（WARNING）
+- `aop-static-method-pointcut`：切点仅命中 static 方法（WARNING）
+- `aop-target-not-proxied`：被通知的 Bean 未实现任何接口，JDK 动态代理无法包装（WARNING）
+- `aop-factory-bean-interface-return`：`@Bean` 工厂方法声明返回接口类型且被切面命中，运行时按声明类型收集接口必为空（WARNING）
+- `advice-signature-invalid`：`@Around` 通知签名非法（ERROR），`@AfterReturning` / `@AfterThrowing` 签名非法（WARNING）
+
+插件用法与完整规则清单见 [taboolib-ioc-gradle-plugin](https://github.com/wcpe/taboolib-ioc-gradle-plugin)。
+
 ## 使用建议
 
 - Kotlin 属性注入直接写 `@Inject lateinit var foo: Foo` 即可，不需要强制改成 `@field:Inject`
@@ -881,6 +896,20 @@ fun `字段循环依赖 - singleton Bean 的字段循环依赖可正常解析`()
 ```bash
 ./gradlew :taboolib-ioc-example:test
 ```
+
+### 端到端起服验证（mc-testkit）
+
+单元测试之外，仓库提供三个模块的真机起服验证，用于在真实 Paper / Spigot 服务端上确认 IoC 容器完成扫描与注入：
+
+```bash
+./gradlew :test-v1_20:e2eSmoke           # Paper 1.20.1（Java 21）
+./gradlew :test-v1_12:e2eSmoke           # Spigot 1.12.2（JDK 17）
+./gradlew :taboolib-ioc-example:e2eSmoke # Paper 1.20.1（Java 8 目标）
+```
+
+- 由 `top.wcpe.mc-testkit` 驱动，已从旧的 run-paper / dev.s7a 方案迁移；采用 mc-testkit 0.9.0 自测模式，未声明 `pluginUnderTest` 时框架自动取本模块 jar 产物并把 `e2eSmoke` / `prepareE2eSmoke` 接线到 `jar` 任务。
+- 判定真源为结果文件 `build/mc-testkit/results/smoke.properties` 的 `status=PASS`（而非 stdout 文本），构建非零退出即判失败。
+- 运行期可用 `MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR` 覆盖被测插件 jar（CI / GradleRunner 注入）。
 
 ## 架构文档
 
