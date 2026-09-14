@@ -5,7 +5,7 @@ plugins {
     `maven-publish`
     id("io.izzel.taboolib") version "2.0.38-wcpe.1" apply false
     id("top.wcpe.mc-testkit") version "0.9.0" apply false
-    id("top.wcpe.taboolib.ioc") version "0.0.6" apply false
+    id("top.wcpe.taboolib.ioc") version "0.0.7" apply false
     kotlin("jvm") version "1.9.25" apply false
 }
 
@@ -60,8 +60,12 @@ subprojects {
         repositories {
             maven {
                 credentials {
-                    username = project.findProperty("username")?.toString() ?: ""
-                    password = project.findProperty("password")?.toString() ?: ""
+                    // 优先读取 WCPE_MAVEN_USERNAME/PASSWORD；回退旧名 username/password 保持向后兼容。
+                    // 旧名那对值对 maven-releases 的 PUT 返回 401，只有 WCPE_MAVEN_* 返回 201。
+                    username = (project.findProperty("WCPE_MAVEN_USERNAME")
+                        ?: project.findProperty("username"))?.toString() ?: ""
+                    password = (project.findProperty("WCPE_MAVEN_PASSWORD")
+                        ?: project.findProperty("password"))?.toString() ?: ""
                 }
                 authentication {
                     create<BasicAuthentication>("basic")
