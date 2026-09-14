@@ -32,6 +32,40 @@
 - 依赖仓库顺序调整并补充本地代理直连名单（`nonProxyHosts`）
 - 重写两处伪测试（`CompanionObjectInjectorTest` / `ObjectInjectorTest`）并补齐缺陷回归用例，core 287 tests 全绿
 
+## [1.2.0] - 2026-06-22
+
+> **回溯补录**：1.2.0 发布时（提交 `0e71861`）未随版本写入 CHANGELOG，本节现依据 `c25a96b`（1.1.0 发布提交）至 `0e71861` 之间的提交逐条核实后补入。
+
+### 新增
+
+- 拆出独立测试支撑模块 `taboolib-ioc-test`：将 `IocTestContext` 与 TabooLib 测试注解从 core 的 `testFixtures` 迁移为对外发布模块，供外部项目直接复用；`taboolib-ioc-example` / `test-v1_12` / `test-v1_20` 的测试依赖同步切换
+- 示例模块补充启动链路验证用例，覆盖 `TabooLibIocTest` 自动注入与 `CONST`→`DISABLE` 启动链路在示例模块中的可用性
+- `test-v1_12` / `test-v1_20` 各新增 mock 插件主源集与 12 套测试，覆盖 Bean 注册、注入、`@Primary`/`@Order`、条件装配、作用域、生命周期、`@Lazy`、AOP、`@Value`/`@PropertySource`、`BeanPostProcessor` 与 MockBukkit 集成（v1_12 共 136、v1_20 共 137 个用例）
+- 新增 `BeanInstantiationException`，为构造函数/方法注入的参数校验提供清晰错误信息
+- 新增 `BeanRegistry.remove()`、`ClassScanner` 公开扫描入口、`LifecycleManager.getBeanPostProcessors()` / `recordInitialization()` 等方法
+- 新增 `docs/testing.md` 测试支撑模块指南（模块职责、可复用能力、启动链路与可观测开关）
+
+### 修复
+
+- **`RefreshBeanScope` 缺少销毁回调**：`refresh()` / `clear()` 现调用 `@PreDestroy`，防止资源泄漏
+- **手动注册 Bean 生命周期**：`registerBean()` 改为执行完整生命周期（属性注入、`BeanPostProcessor`、`@PostConstruct`、AOP 代理）
+- **参数校验**：构造函数参数为 `null` 时抛出 `BeanInstantiationException` 并携带详细调试信息；方法注入参数为 `null` 时同样抛异常而非仅告警
+- **循环依赖检测范围**扩展至所有作用域，日志区分可解析 / 不可解析依赖
+- **`shutdown()` 清理 `singletonLocks`**，避免锁对象长期驻留导致内存占用增长
+- **跨平台注入反射崩溃**：`findAnnotationCarrier` 反射 `declaredMethods` 捕获 `NoClassDefFoundError`，`injectObjectFields` 两处 `catch(Exception)` 放宽为 `catch(Throwable)`，避免错误平台宿主（如 Bukkit 上加载 Bungee 事件）导致整个插件 enable 失败
+- **object 注入器平台过滤**：`collectObjectClasses` 增加 `@PlatformSide` 门控，从收集阶段跳过不匹配的宿主
+- **`Injector.invokePostConstruct`**：修复反射异常包装导致 `@PostConstruct` 抛出的 `RuntimeException` 被吞为 `InvocationTargetException`
+- **`ThreadBeanScopeTest` 内存泄漏断言**：改为按去重后实例数判断，避免 `WeakReference` 未被 GC 时误报
+- **CI 构建任务名**：修正不存在的 `taboolibBuildPlugin`，统一改用 `taboolibMainTask`；CI 以 `:<module>:assemble` 串联 `jar → taboolibMainTask`，避免漏跑前置任务
+
+### 变更
+
+- 版本切至 `1.2.0-SNAPSHOT`，同步 Kotlin 标识与架构文档；清理已迁移至独立模块的 core `testFixtures` 入口
+- 示例模块改用 `id("top.wcpe.taboolib.ioc")` Gradle 插件自动处理 relocate，移除手动 `relocate(...)` 与 `taboo(project(":taboolib-ioc"))`；根工程以 `apply false` 声明插件 `0.0.6`，`settings.gradle.kts` 的 `pluginManagement` 增补解析仓库
+- CI 新增自动测试流水线：`push` / PR 触发 `./gradlew test --continue` 并跨模块汇总；`aggregate-test-results.py` 解析各模块 JUnit XML 生成 Markdown 报告并写入 Step Summary；上传 JUnit XML / HTML / Markdown 三类 artifact，并通过 `EnricoMi/publish-unit-test-result-action` 在 Checks 页签呈现结果
+- CI 新增 1.12.2 / 1.20.4 真实服务器烟雾测试矩阵（`server-smoke.sh` 下载对应版本服务端、部署插件、扫描日志关键字判定成功后优雅退出）
+- 测试规模：相较 1.1.0，本版新增 55+ 单元测试（并发初始化、手动注册生命周期、作用域循环依赖、构造参数校验、锁清理、Refresh 销毁、ThreadLocal 泄漏等）
+
 ## [1.1.0] - 2026-03-14
 
 ### 新增
@@ -152,7 +186,7 @@
 
 ## 版本规划
 
-### [1.2.0] - 计划中
+### 待评估（尚未纳入任何版本）
 - CGLIB 代理支持（无接口类 AOP）
 - `@Async` 异步方法
 - Bean 定义覆盖策略

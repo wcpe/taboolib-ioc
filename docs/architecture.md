@@ -1,6 +1,6 @@
 # taboolib-ioc 架构文档
 
-> 版本：1.1.0 | TabooLib 6.2.x | Kotlin 1.9.25
+> 版本：1.3.0 | TabooLib 6.2.x | Kotlin 1.9.25
 
 ---
 

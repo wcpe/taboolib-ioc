@@ -14,7 +14,7 @@ repositories {
 }
 
 dependencies {
-    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.1.0")
+    taboo("top.wcpe.taboolib.ioc:taboolib-ioc:1.3.0")
 }
 
 // 重定向到你的插件包名，避免与其他插件冲突
