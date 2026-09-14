@@ -14,6 +14,70 @@ permissions:
   contents: write
 
 jobs:
+  # ── 发版前置守卫：tag 必须落在默认分支 main 上 ───────────────────────────
+  # 收紧发版语义为「主干分支带 tag 才发布」：只有 tag 指向的提交是 main 的祖先时，
+  # 才允许进入后续 test / build-and-release。守卫不通过 → 本 job 失败 → 下游 job 因
+  # needs 不启动 → 整条工作流失败，绝不建 Release。
+  #
+  # 两条触发路径都要覆盖：
+  #   push tag           → 触发引用即 tag，GITHUB_SHA 就是被标记的提交；
+  #   workflow_dispatch  → 输入只是字符串 tag，本地未必存在该 ref，需先显式 fetch
+  #                        再用 rev-parse 解析成提交，统一走同一套判定。
+  verify-tag:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要完整历史，git merge-base 才能判断祖先关系
+          fetch-depth: 0
+
+      - name: Verify tag points to a commit on main
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          TRIGGER_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # 1) 解析本次要发布的 tag：dispatch 取输入，push 取触发引用名
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG}"
+          else
+            TAG="${TRIGGER_REF_NAME}"
+          fi
+
+          # 2) tag 名格式校验：必须形如 v<主>.<次>.<修订>，与触发条件 v*.*.* 一致，
+          #    避免 workflow_dispatch 传入分支名 / 非版本串后静默发出错误版本。
+          if ! printf '%s' "${TAG}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::非法版本 tag '${TAG}'：正式发版要求 tag 形如 v<主>.<次>.<修订>（例如 v1.3.0）。"
+            exit 1
+          fi
+
+          # 3) 显式取齐引用：origin/main 与目标 tag。
+          #    fetch-depth:0 通常已包含两者，但 workflow_dispatch 时目标 tag 可能是
+          #    克隆之后才由他人推送的，故显式再取一次以保证其存在（取不到即报错，不静默）。
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
+          git fetch --no-tags --force origin "refs/tags/${TAG}:refs/tags/${TAG}" \
+            || { echo "::error::无法获取 tag '${TAG}'，请确认该 tag 已推送到远端。"; exit 1; }
+
+          # 4) 解析 tag 指向的提交（^{commit} 会剥离 annotated tag，拿到真实提交）
+          TAG_COMMIT=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          echo "目标 tag：${TAG}"
+          echo "tag 指向提交：${TAG_COMMIT}"
+          echo "main 当前提交：$(git rev-parse refs/remotes/origin/main)"
+
+          # 5) 判定：tag 指向的提交必须是 main 的祖先（含 main 自身）。
+          #    --is-ancestor 返回 0 = 是祖先（通过），返回 1 = 不是祖先（拦截）。
+          if git merge-base --is-ancestor "${TAG_COMMIT}" refs/remotes/origin/main; then
+            echo "::notice::tag ${TAG} 位于 main 上，允许发版。"
+          else
+            echo "::error::tag ${TAG} 未落在 main 上。正式发版要求 tag 必须打在 main 分支的提交上；请先将改动合并到 main、再在 main 的提交上打 tag。"
+            exit 1
+          fi
+
   # ── 测试门禁（独立 job）────────────────────────────────────────────────
   # 「发版产物必须经过验证」的意图由本 job 承载：test 全绿才允许 release 启动。
   # 与 release 解耦：任一 flaky 测试失败不会让 release job 自己跑测试而反复失败，
@@ -21,9 +85,16 @@ jobs:
   test:
     name: Test gate (must pass before release)
     runs-on: ubuntu-latest
+    # 先过 tag 守卫：tag 不在 main 上则连测试都不跑，直接置整条工作流为失败。
+    needs: verify-tag
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 按 tag 取提交：push tag 时 github.ref 即该 tag；workflow_dispatch 时若不给 ref，
+          # checkout 会检出「触发时选的分支」（默认 main），可能测到 main@HEAD 而非被发布的提交。
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          # 只取被发布的这一个提交即可，无需历史（保持默认浅克隆，避免多余开销）。
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -52,6 +123,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # 按 tag 取提交：杜绝 workflow_dispatch 时误用主干 HEAD 的产物打上旧 tag 版本。
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          # 需要完整历史：更新日志要按上一个版本 tag / 发布提交计算范围与对比链接。
           fetch-depth: 0
 
       # ── 2. 解析版本号 ────────────────────────────────────────────────────
@@ -65,17 +139,14 @@ jobs:
           fi
           # 去掉前缀 v，得到纯版本号（如 1.2.0）
           VERSION="${TAG#v}"
-          # 预发布语义：仅 rc / alpha / beta / m 等明确预发布标识才判定为 prerelease，
-          # 避免 v1.2.0-hotfix 这类正式补丁被误判为预发布。
-          if printf '%s' "${VERSION}" | grep -qiE '(^|[.-])(rc|alpha|beta|pre|m)[0-9]*([.-]|$)'; then
-            PRERELEASE="true"
-          else
-            PRERELEASE="false"
-          fi
-          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
-          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
-          echo "Resolved: tag=${TAG}, version=${VERSION}, prerelease=${PRERELEASE}"
+          # 发布策略：本仓库只发正式版（vX.Y.Z），不支持预发布版。
+          # verify-tag 守卫的正则 ^v[0-9]+\.[0-9]+\.[0-9]+$ 只放行 vX.Y.Z，任何带后缀的
+          # tag（rc / alpha / beta / m 等）都会被拦截并令工作流失败，因此此处不存在预发布
+          # 路径，只输出 tag / version（原先的 rc / alpha / beta / m 判定永不可达，已删除）。
+          # 若将来确需发预发布，必须同时放宽守卫正则并恢复此处的后缀判定逻辑。
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=${TAG}, version=${VERSION}"
 
       # ── 3. 写入构建版本号，覆盖 SNAPSHOT ────────────────────────────────
       - name: Set version in gradle.properties
@@ -108,6 +179,8 @@ jobs:
       # ── 7. 收集产物（含 jar 内容校验）────────────────────────────────────
       - name: Collect artifacts
         id: artifacts
+        # 显式声明 bash：下方使用 $'\n' 与 heredoc 多行定界符输出，依赖 bash 语义。
+        shell: bash
         run: |
           set -euo pipefail
           # 库产物：api / core / annotation 承载全部实现类；
@@ -138,40 +211,68 @@ jobs:
               continue
             fi
             echo "OK (${class_count} classes): ${jar}"
-            ARTIFACTS="${ARTIFACTS} ${jar}"
+            # 按换行累加：softprops/action-gh-release 的 files 以换行或逗号切分多个
+            # glob，空格分隔串会被当成「单个不存在的文件名」→ 建出 Release 却 0 资产
+            # （fail_on_unmatched_files 默认 false 时仍 success，静默通过）。
+            ARTIFACTS+="${jar}"$'\n'
           done
 
-          ARTIFACTS="${ARTIFACTS# }"
-          if [ -z "${ARTIFACTS// /}" ]; then
+          # 去掉尾部多余换行，得到「每行一个 jar 路径」的多行串。
+          ARTIFACTS="${ARTIFACTS%$'\n'}"
+          if [ -z "${ARTIFACTS}" ]; then
             echo "::error::全部候选 jar 都不含 class 条目，构建目录异常"
             exit 1
           fi
-          echo "artifacts=${ARTIFACTS}" >> "$GITHUB_OUTPUT"
+          # 用 GITHUB_OUTPUT 的「多行定界符」语法输出：多行 value 必须以
+          # <<DELIM ... DELIM 包裹，否则 value 会在第一个换行处被截断。
+          {
+            echo "artifacts<<__ARTIFACTS_EOF__"
+            printf '%s\n' "${ARTIFACTS}"
+            echo "__ARTIFACTS_EOF__"
+          } >> "$GITHUB_OUTPUT"
           echo "excluded=${EXCLUDED# }" >> "$GITHUB_OUTPUT"
-          echo "Found artifacts: ${ARTIFACTS}"
+          echo "Found artifacts:"
+          printf '%s\n' "${ARTIFACTS}"
           echo "Excluded empty jars: ${EXCLUDED# }"
 
       # ── 8. 生成更新日志 ──────────────────────────────────────────────────
       - name: Generate changelog
         id: changelog
         run: |
-          # 找出上一个 tag（无则从初始提交起）
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${{ steps.version.outputs.tag }}$" | head -n 1)
+          # 找出上一个**版本** tag 作为基线。
+          # 必须限定 v*.*.* ：否则 --sort=-version:refname 会把 SNAPSHOT / backup-* 这类非版本
+          # tag 排在前面，导致基线误取到数月前的预发布 tag，更新日志从初始提交起算（v1.3.0 即踩此坑）。
+          PREV_TAG=$(git tag --list 'v*.*.*' --sort=-version:refname | grep -v "^${{ steps.version.outputs.tag }}$" | head -n 1)
           if [ -z "${PREV_TAG}" ]; then
-            RANGE="HEAD"
-            echo "No previous tag found, listing all commits"
+            # 无版本 tag 时退回「上一次发布提交」（chore(release)...）作为基线；
+            # 首个版本（历史里没有更早的发布提交）才退化为全量列表。
+            PREV_COMMIT=$(git log --format=%H --grep='^chore(release)' -n 1 --skip=1 || true)
+            if [ -n "${PREV_COMMIT}" ]; then
+              RANGE="${PREV_COMMIT}..HEAD"
+              PREV_REF="${PREV_COMMIT}"
+              echo "No version tag found, fallback range: ${PREV_COMMIT:0:7} -> HEAD"
+            else
+              RANGE="HEAD"
+              PREV_REF=""
+              echo "No previous tag/commit found, listing all commits"
+            fi
           else
             RANGE="${PREV_TAG}..HEAD"
+            PREV_REF="${PREV_TAG}"
             echo "Changelog range: ${PREV_TAG} -> HEAD"
           fi
 
+          # GitHub 会把裸 @xxx 渲染成「用户提及」（提交信息里的注解名如 @Bean 会误触发提及）；
+          # 统一把 @Word 包成反引号。已在反引号内的不重复处理（用前置字符非反引号做守卫）。
+          sanitize() { sed -E 's/(^|[^`])@([A-Za-z][A-Za-z0-9_-]*)/\1`@\2`/g'; }
+
           # 按类型收集提交（feat / fix / refactor / docs / chore / 其他）
-          FEAT=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- feat" || true)
-          FIX=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- fix" || true)
-          REFACTOR=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- refactor" || true)
-          DOCS=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- docs" || true)
-          CHORE=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- chore|^- build|^- ci" || true)
-          OTHER=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -ivE "^- feat|^- fix|^- refactor|^- docs|^- chore|^- build|^- ci" || true)
+          FEAT=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- feat" | sanitize || true)
+          FIX=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- fix" | sanitize || true)
+          REFACTOR=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- refactor" | sanitize || true)
+          DOCS=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- docs" | sanitize || true)
+          CHORE=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -iE "^- chore|^- build|^- ci" | sanitize || true)
+          OTHER=$(git log ${RANGE} --pretty=format:"- %s (%h)" -- | grep -ivE "^- feat|^- fix|^- refactor|^- docs|^- chore|^- build|^- ci" | sanitize || true)
 
           {
             echo "## 更新内容"
@@ -190,7 +291,7 @@ jobs:
             echo "- 实现类分布在 \`taboolib-ioc-core\` / \`taboolib-ioc-api\` / \`taboolib-ioc-annotation\`；"
             echo "  \`taboolib-ioc\` 是聚合门面（仅 MANIFEST + 传递依赖声明，0 个 class），故不作为独立 jar 发布。"
             echo ""
-            [ -n "${PREV_TAG}" ] && echo "**完整变更**：[\`${PREV_TAG}\` → \`${{ steps.version.outputs.tag }}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ steps.version.outputs.tag }})"
+            [ -n "${PREV_REF}" ] && echo "**完整变更**：[\`${PREV_REF}\` → \`${{ steps.version.outputs.tag }}\`](https://github.com/${{ github.repository }}/compare/${PREV_REF}...${{ steps.version.outputs.tag }})"
           } > CHANGELOG_BODY.md
 
           cat CHANGELOG_BODY.md
@@ -203,7 +304,10 @@ jobs:
           name: "taboolib-ioc-${{ steps.version.outputs.tag }}"
           body_path: CHANGELOG_BODY.md
           draft: false
-          prerelease: ${{ steps.version.outputs.prerelease }}
+          # 严格策略：守卫只放行 vX.Y.Z，本仓库只发正式版，永不签发预发布版。
+          prerelease: false
           files: ${{ steps.artifacts.outputs.artifacts }}
+          # 任一 glob 未命中即判失败，杜绝「构建绿但 Release 0 资产」再次静默通过。
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
