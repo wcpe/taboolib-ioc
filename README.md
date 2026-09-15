@@ -6,6 +6,72 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.25-orange)](https://kotlinlang.org)
 [![TabooLib](https://img.shields.io/badge/TabooLib-6.2.4-green)](https://tabooproject.org)
 
+**三个与常见 IoC 容器不同的点：**
+
+- **[编译期织入](#编译期织入weavingtrue)** —— JDK 动态代理要求目标实现接口，具体类会被静默跳过；开启 `weaving(true)` 后由构建期改写方法体，**具体类也能被切面命中，且进程内不创建任何代理**。
+- **[真机基准数据](#基准与压力测试)** —— 容器 API 的 ns/op 与「每次调用分配字节数」都在**真实 Paper 服务端**实测，附对照组、轮间噪声量级与诚实边界，不拿估算值充数。
+- **[编译期静态诊断](#编译期静态诊断)** —— 缺失 Bean、切点写错、通知签名非法等问题在**构建期**就报出来并附源码位置，不用等起服才发现。
+
+## 目录
+
+- [当前支持](#当前支持)
+- [作用域与扫描说明](#作用域与扫描说明)
+- [安装](#安装)
+  - [Gradle (Kotlin DSL)](#gradle-kotlin-dsl)
+- [快速开始](#快速开始)
+  - [1. 定义组件](#1-定义组件)
+  - [2. 使用依赖注入](#2-使用依赖注入)
+  - [3. 名称限定注入](#3-名称限定注入)
+  - [4. 生命周期回调](#4-生命周期回调)
+  - [5. 从容器获取 Bean](#5-从容器获取-bean)
+    - [Kotlin 扩展方法](#kotlin-扩展方法)
+  - [6. Kotlin object / companion object 注入](#6-kotlin-object--companion-object-注入)
+  - [7. 作用域与懒加载](#7-作用域与懒加载)
+  - [8. AOP 切面编程](#8-aop-切面编程)
+    - [编译期织入（`weaving(true)`）](#编译期织入weavingtrue)
+- [未开启织入（默认）](#未开启织入默认)
+- [开启 weaving(true) 后](#开启-weavingtrue-后)
+  - [9. 条件装配](#9-条件装配)
+  - [10. 线程作用域与可刷新作用域](#10-线程作用域与可刷新作用域)
+  - [11. @Configuration + @Bean](#11-configuration--bean)
+  - [12. @PropertySource 配置文件](#12-propertysource-配置文件)
+  - [13. BeanPostProcessor 扩展](#13-beanpostprocessor-扩展)
+  - [14. @DependsOn 初始化顺序](#14-dependson-初始化顺序)
+  - [15. @Inject(required = false) 可选注入](#15-injectrequired--false-可选注入)
+- [完整示例](#完整示例)
+- [容器 API](#容器-api)
+- [构造函数选择规则](#构造函数选择规则)
+- [示例插件](#示例插件)
+- [编译期静态诊断](#编译期静态诊断)
+- [使用建议](#使用建议)
+- [单元测试](#单元测试)
+  - [配置测试依赖](#配置测试依赖)
+  - [IocTestContext 测试上下文](#ioctestcontext-测试上下文)
+  - [TabooLibIocTest 全链路引导（推荐）](#taboolibioctest-全链路引导推荐)
+  - [测试用例示例](#测试用例示例)
+    - [示例：构造函数注入测试](#示例构造函数注入测试)
+    - [示例：@Named 多实现选择测试](#示例named-多实现选择测试)
+    - [示例：Prototype 作用域测试](#示例prototype-作用域测试)
+    - [示例：字段循环依赖测试](#示例字段循环依赖测试)
+  - [端到端起服验证（mc-testkit）](#端到端起服验证mc-testkit)
+- [基准与压力测试](#基准与压力测试)
+  - [怎么跑](#怎么跑)
+- [① 手动：控制台或游戏内执行（权限 taboolib.ioc.bench），命令立即返回、测试跑在独立线程](#①-手动控制台或游戏内执行权限-taboolibiocbench命令立即返回测试跑在独立线程)
+- [② 全自动（CI / 脚本）：环境变量或 -D 系统属性](#②-全自动ci--脚本环境变量或--d-系统属性)
+  - [实测结果](#实测结果)
+    - [1. 单线程稳态吞吐（预热 + 3 轮取最优）](#1-单线程稳态吞吐预热--3-轮取最优)
+    - [2. 并发扩展性（`getBean(Class)`）](#2-并发扩展性getbeanclass)
+    - [3. 延迟分位](#3-延迟分位)
+    - [4. 压力测试与内存](#4-压力测试与内存)
+    - [5. AOP 调用开销](#5-aop-调用开销)
+    - [AOP 的开销花在哪、已经降到多少](#aop-的开销花在哪已经降到多少)
+    - [类型索引缓存：`getByType()` 的每次调用分配](#类型索引缓存getbytype-的每次调用分配)
+  - [从数据里读出什么](#从数据里读出什么)
+  - [口径与边界（重要）](#口径与边界重要)
+  - [性能消耗算大吗？](#性能消耗算大吗)
+  - [优点与适用性](#优点与适用性)
+- [架构文档](#架构文档)
+
 ## 当前支持
 
 - 组件标记：`@Component`、`@Service`、`@Repository`、`@Controller`
@@ -37,6 +103,7 @@
 - `@Inject(required = false)`：可选注入，依赖不存在时不抛异常
 - `BeanPostProcessor`：Bean 初始化前后的扩展回调
 - 多生命周期方法：同一个类可以有多个 `@PostConstruct`/`@PostEnable`/`@PreDestroy` 方法
+- 内置基准与压力测试套件：在**真实 Paper 服务端**测单线程吞吐、并发扩展性、延迟分位、持续压力与前后内存，并输出确定性指标「每次调用分配字节数」（不受 GC/调度波动影响）
 
 ## 作用域与扫描说明
 
@@ -142,6 +209,9 @@ class OrderService {
 
 当同一接口有多个实现时，使用 `@Named` 或 `@Resource` 指定具体实现：
 
+<details>
+<summary>展开代码（kotlin，36 行）</summary>
+
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Component
 import top.wcpe.yourplugin.ioc.annotation.Service
@@ -181,7 +251,12 @@ class PaymentService {
 }
 ```
 
+</details>
+
 ### 4. 生命周期回调
+
+<details>
+<summary>展开代码（kotlin，23 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Service
@@ -209,7 +284,12 @@ class LifecycleService {
 }
 ```
 
+</details>
+
 ### 5. 从容器获取 Bean
+
+<details>
+<summary>展开代码（kotlin，19 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.bean.BeanContainer
@@ -233,9 +313,14 @@ val names = BeanContainer.getBeanNames()
 BeanContainer.registerBean("manualValue", MyCustomObject("data"))
 ```
 
+</details>
+
 #### Kotlin 扩展方法
 
 更简洁的 Bean 获取方式：
+
+<details>
+<summary>展开代码（kotlin，15 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.bean.bean
@@ -255,7 +340,12 @@ val optional = beanOrNull<UserService>()
 val allGateways = beans<PaymentGateway>()
 ```
 
+</details>
+
 ### 6. Kotlin object / companion object 注入
+
+<details>
+<summary>展开代码（kotlin，34 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Inject
@@ -294,9 +384,14 @@ class AnotherPlugin {
 }
 ```
 
+</details>
+
 > 说明：`object` 和 `companion object` 中带 `@Inject`/`@Resource` 的字段均在 ENABLE -90 阶段自动注入，无需手动操作。
 
 ### 7. 作用域与懒加载
+
+<details>
+<summary>展开代码（kotlin，23 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Service
@@ -324,9 +419,14 @@ class LazyService
 class ConversationService
 ```
 
+</details>
+
 ### 8. AOP 切面编程
 
 使用 `@Aspect` 定义切面，通过 `@Before`、`@After`、`@Around` 拦截方法调用：
+
+<details>
+<summary>展开代码（kotlin，36 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -366,6 +466,8 @@ class LoggingAspect {
     }
 }
 ```
+
+</details>
 
 选择哪种方式拦截：
 
@@ -449,6 +551,9 @@ public synthetic String greet$ioc$original(String name) { /* 原方法体原样�
 
 根据运行时条件决定是否注册 Bean：
 
+<details>
+<summary>展开代码（kotlin，31 行）</summary>
+
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
 
@@ -483,11 +588,16 @@ class ProductionCondition : Condition {
 class ProductionOnlyService
 ```
 
+</details>
+
 条件评估分两阶段：
 1. 扫描时：`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnProperty`、`@Conditional`
 2. 注册后：`@ConditionalOnBean`、`@ConditionalOnMissingBean`（依赖已注册的 Bean 信息）
 
 ### 10. 线程作用域与可刷新作用域
+
+<details>
+<summary>展开代码（kotlin，28 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -520,7 +630,12 @@ fun example() {
 }
 ```
 
+</details>
+
 ### 11. @Configuration + @Bean
+
+<details>
+<summary>展开代码（kotlin，24 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -549,7 +664,12 @@ class DatabaseConfig {
 }
 ```
 
+</details>
+
 ### 12. @PropertySource 配置文件
+
+<details>
+<summary>展开代码（kotlin，20 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -574,7 +694,12 @@ class AppInfo {
 }
 ```
 
+</details>
+
 ### 13. BeanPostProcessor 扩展
+
+<details>
+<summary>展开代码（kotlin，10 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.Component
@@ -589,7 +714,12 @@ class AuditPostProcessor : BeanPostProcessor {
 }
 ```
 
+</details>
+
 ### 14. @DependsOn 初始化顺序
+
+<details>
+<summary>展开代码（kotlin，14 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -608,7 +738,12 @@ class UserDao {
 }
 ```
 
+</details>
+
 ### 15. @Inject(required = false) 可选注入
+
+<details>
+<summary>展开代码（kotlin，10 行）</summary>
 
 ```kotlin
 import top.wcpe.yourplugin.ioc.annotation.*
@@ -623,9 +758,14 @@ class PluginFeature {
 }
 ```
 
+</details>
+
 ## 完整示例
 
 以下是一个完整的插件示例，展示所有核心功能：
+
+<details>
+<summary>展开代码（kotlin，65 行）</summary>
 
 ```kotlin
 import taboolib.common.LifeCycle
@@ -695,6 +835,8 @@ object ExamplePlugin {
 }
 ```
 
+</details>
+
 ## 容器 API
 
 ```kotlin
@@ -749,6 +891,9 @@ BeanContainer.registerBean("manualValue", ManualValue("ok"))
 
 预期启动日志包含：
 
+<details>
+<summary>展开代码（text，15 行）</summary>
+
 ```text
 Taboolib IoC Example Plugin 启动
 constructorInjection=ioc-ready
@@ -766,6 +911,8 @@ objectInjection=ioc-ready|wechat|wechat
 fieldCircularInjection=left->right|right->left
 constructorCycleDetection=exampleConstructorCycleLeft -> exampleConstructorCycleRight -> exampleConstructorCycleLeft
 ```
+
+</details>
 
 关闭插件时还会看到：
 
@@ -801,6 +948,9 @@ IoC 容器的一大优势是让业务组件可以脱离 Bukkit/TabooLib 运行�
 
 如果你只是在仓库内部写测试，可以继续直接依赖 `taboolib-ioc-core` 的普通测试源码；如果你希望把这套测试能力稳定提供给外部使用，建议直接依赖新模块 `taboolib-ioc-test`：
 
+<details>
+<summary>展开代码（kotlin，16 行）</summary>
+
 ```kotlin
 dependencies {
     // 生产依赖
@@ -819,6 +969,8 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 ```
+
+</details>
 
 ### IocTestContext 测试上下文
 
@@ -845,6 +997,9 @@ val service = ctx.getBean(UserService::class.java)  // 获取 Bean
 
 如果需要可观测日志，打开 `observable = true`：
 
+<details>
+<summary>展开代码（kotlin，12 行）</summary>
+
 ```kotlin
 @TabooLibIocTest(
     DemoService::class,
@@ -859,6 +1014,8 @@ class DemoTest {
     lateinit var service: DemoService
 }
 ```
+
+</details>
 
 更完整的测试支持说明见 [docs/testing.md](docs/testing.md)。
 
@@ -888,6 +1045,9 @@ class DemoTest {
 
 #### 示例：构造函数注入测试
 
+<details>
+<summary>展开代码（kotlin，12 行）</summary>
+
 ```kotlin
 @Test
 fun `构造函数注入 - Service 通过构造函数获取 Repository 依赖`() {
@@ -903,7 +1063,12 @@ fun `构造函数注入 - Service 通过构造函数获取 Repository 依赖`() 
 }
 ```
 
+</details>
+
 #### 示例：@Named 多实现选择测试
+
+<details>
+<summary>展开代码（kotlin，14 行）</summary>
 
 ```kotlin
 @Test
@@ -922,7 +1087,12 @@ fun `Named限定注入 - 同一接口多个实现时按名称选择`() {
 }
 ```
 
+</details>
+
 #### 示例：Prototype 作用域测试
+
+<details>
+<summary>展开代码（kotlin，14 行）</summary>
 
 ```kotlin
 @Test
@@ -941,7 +1111,12 @@ fun `Prototype作用域 - 每次获取都创建新实例`() {
 }
 ```
 
+</details>
+
 #### 示例：字段循环依赖测试
+
+<details>
+<summary>展开代码（kotlin，13 行）</summary>
 
 ```kotlin
 @Test
@@ -958,6 +1133,8 @@ fun `字段循环依赖 - singleton Bean 的字段循环依赖可正常解析`()
     assertSame(a, b!!.nodeA)
 }
 ```
+
+</details>
 
 完整测试代码见：`taboolib-ioc-example/src/test/kotlin/top/wcpe/ioc/example/ExamplePluginIoCTest.kt`
 
