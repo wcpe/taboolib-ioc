@@ -5,7 +5,7 @@ plugins {
     `maven-publish`
     id("io.izzel.taboolib") version "2.0.38-wcpe.1" apply false
     id("top.wcpe.mc-testkit") version "0.9.0" apply false
-    id("top.wcpe.taboolib.ioc") version "0.0.7" apply false
+    id("top.wcpe.taboolib.ioc") version "0.0.8" apply false
     kotlin("jvm") version "1.9.25" apply false
 }
 

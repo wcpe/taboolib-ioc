@@ -1,5 +1,6 @@
 package top.wcpe.taboolib.ioc.aop
 
+import taboolib.common.platform.function.debug
 import taboolib.common.platform.function.warning
 import java.lang.reflect.Proxy
 
@@ -21,6 +22,18 @@ class AopProxyFactory(
      * @return 代理对象或原始实例
      */
     fun wrapIfNecessary(instance: Any, beanClass: Class<*>): Any {
+        // 编译期织入的类：方法体里已经调用 AopWeavingRuntime，再代理会让通知执行两次
+        if (WovenTarget::class.java.isAssignableFrom(beanClass)) {
+            debug("[IoC] ${beanClass.name} 已由编译期织入处理，跳过 AOP 代理")
+            return instance
+        }
+
+        // 声明式排除：整类 @NoAspect → 连代理都不创建，零额外开销
+        if (AopExclusions.isClassExcluded(beanClass)) {
+            debug("[IoC] ${beanClass.name} 标注了 @NoAspect，跳过 AOP 代理")
+            return instance
+        }
+
         val matchingAdvisors = advisorRegistry.findMatchingAdvisors(beanClass)
         if (matchingAdvisors.isEmpty()) {
             return instance
@@ -38,7 +51,7 @@ class AopProxyFactory(
             return instance
         }
 
-        val handler = JdkDynamicAopProxy(instance, beanClass, matchingAdvisors)
+        val handler = JdkDynamicAopProxy(instance, beanClass, advisorRegistry)
         return Proxy.newProxyInstance(
             beanClass.classLoader ?: Thread.currentThread().contextClassLoader,
             interfaces,

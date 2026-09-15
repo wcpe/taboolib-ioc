@@ -4,6 +4,7 @@ import taboolib.common.platform.function.warning
 import top.wcpe.taboolib.ioc.annotation.Order
 import top.wcpe.taboolib.ioc.bean.Advisor
 import java.lang.reflect.Modifier
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -12,6 +13,21 @@ import java.util.concurrent.CopyOnWriteArrayList
 class AdvisorRegistry {
 
     private val advisors = CopyOnWriteArrayList<Advisor>()
+
+    /**
+     * 注册表版本号：每次 [register] / [registerAll] / [clear] 自增。
+     *
+     * 代理侧的「方法 → 调用计划」缓存以此为失效依据 —— 既让热路径不必每次重做切点匹配，
+     * 又保证**运行期新注册切面**（手动注册路径）能立刻对已存在的代理生效。
+     */
+    @Volatile
+    var version: Int = 0
+        private set
+
+    /** 类级匹配结果缓存：`Class -> (版本, 匹配到的通知器)`。 */
+    private val snapshotCache = ConcurrentHashMap<Class<*>, ClassSnapshot>()
+
+    private class ClassSnapshot(val version: Int, val matched: List<Advisor>)
 
     /**
      * 已对其输出过「仅匹配 static 方法」告警的 Advisor 身份，避免重复刷屏。
@@ -24,10 +40,29 @@ class AdvisorRegistry {
 
     fun register(advisor: Advisor) {
         advisors.add(advisor)
+        version++
     }
 
     fun registerAll(list: List<Advisor>) {
+        if (list.isEmpty()) return
         advisors.addAll(list)
+        version++
+    }
+
+    /**
+     * 取「给定目标类的匹配通知器」快照（带版本校验的缓存）。
+     *
+     * 与 [findMatchingAdvisors] 结果一致，但命中缓存时不做任何遍历 —— 供代理热路径使用。
+     */
+    fun snapshotFor(targetClass: Class<*>): List<Advisor> {
+        val current = version
+        val cached = snapshotCache[targetClass]
+        if (cached != null && cached.version == current) {
+            return cached.matched
+        }
+        val matched = findMatchingAdvisors(targetClass)
+        snapshotCache[targetClass] = ClassSnapshot(current, matched)
+        return matched
     }
 
     /**
@@ -80,6 +115,8 @@ class AdvisorRegistry {
 
     fun clear() {
         advisors.clear()
+        snapshotCache.clear()
+        version++
         synchronized(staticOnlyWarned) {
             staticOnlyWarned.clear()
         }

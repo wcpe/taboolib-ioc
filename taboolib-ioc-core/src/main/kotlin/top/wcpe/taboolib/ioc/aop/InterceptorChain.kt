@@ -9,7 +9,11 @@ import java.lang.reflect.Method
 
 /**
  * 拦截器链 — 按顺序执行 Before → Around → After / AfterReturning / AfterThrowing 通知。
+ *
+ * @deprecated 自 1.3.x 起容器改用 [AopPlan]（代理创建期预计算通知链、零分配复用、MethodHandle 调用）。
+ *   本类保留仅为兼容直接引用它的外部代码，容器内部不再使用。
  */
+@Deprecated("被 AopPlan 取代：代理创建期预计算通知链 + 零分配 + MethodHandle")
 class InterceptorChain(
     private val target: Any,
     private val method: Method,

@@ -6,6 +6,7 @@ import top.wcpe.taboolib.ioc.annotation.Aspect
 import top.wcpe.taboolib.ioc.annotation.ConditionContext
 import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
+import top.wcpe.taboolib.ioc.aop.AopWeavingRuntime
 import top.wcpe.taboolib.ioc.aop.AspectScanner
 import top.wcpe.taboolib.ioc.cycle.CycleDetector
 import top.wcpe.taboolib.ioc.cycle.CycleResolver
@@ -363,6 +364,8 @@ object BeanContainer {
                 registerPendingManualBeanDefinitions()
                 // 2) 初始化切面 Bean 并解析 Advisor（此时手动切面已在注册表中）
                 initializeAspects()
+                // 编译期织入的方法体通过这个入口回调容器（挂载点必须在切面注册完成之后）
+                AopWeavingRuntime.attach(advisorRegistry)
                 // 3) 发现并注册 BeanPostProcessor（此时手动 BPP 已在注册表中）
                 discoverBeanPostProcessors()
                 // 4) 补全初始化前注册 Bean 的完整生命周期（注入 / BPP / @PostConstruct / AOP），
@@ -416,7 +419,9 @@ object BeanContainer {
     }
 
     /**
-     * 发现并注册 BeanPostProcessor。
+     * 发现并注册用户自定义的 BeanPostProcessor。
+     *
+     * 内置处理器（`@WrapWith` 装饰器支持）由 [LifecycleManager] 自身持有，不在这里注册。
      */
     private fun discoverBeanPostProcessors() {
         val processorDefinitions = registry.getAll().filter {
@@ -446,6 +451,7 @@ object BeanContainer {
         lifecycleManager.shutdown()
         clearScopes()
         advisorRegistry.clear()
+        AopWeavingRuntime.detach()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()
@@ -479,6 +485,7 @@ object BeanContainer {
         lifecycleManager.resetState()
         clearScopes()
         advisorRegistry.clear()
+        AopWeavingRuntime.detach()
         cycleResolver.clear()
         registry.clear()
         manualBeansByName.clear()

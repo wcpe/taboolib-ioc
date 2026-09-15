@@ -6,6 +6,7 @@ import top.wcpe.taboolib.ioc.annotation.PropertySource
 import top.wcpe.taboolib.ioc.aop.AdvisorRegistry
 import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.aop.AspectScanner
+import top.wcpe.taboolib.ioc.aop.AopWeavingRuntime
 import top.wcpe.taboolib.ioc.bean.BeanPostProcessor
 import top.wcpe.taboolib.ioc.bean.BeanResolver
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
@@ -132,6 +133,8 @@ class IocTestContext {
             val advisors = AspectScanner.scan(aspectInstance, definition.type)
             advisorRegistry.registerAll(advisors)
         }
+        // 编译期织入的方法体通过这个入口回调（与 BeanContainer 的挂载点语义一致）
+        AopWeavingRuntime.attach(advisorRegistry)
         val processorDefinitions = registry.getAll().filter {
             BeanPostProcessor::class.java.isAssignableFrom(it.type)
         }

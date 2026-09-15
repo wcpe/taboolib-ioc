@@ -8,6 +8,7 @@ import top.wcpe.taboolib.ioc.aop.AopProxyFactory
 import top.wcpe.taboolib.ioc.bean.BeanCreatedEvent
 import top.wcpe.taboolib.ioc.bean.BeanDefinition
 import top.wcpe.taboolib.ioc.bean.BeanDestroyedEvent
+import top.wcpe.taboolib.ioc.aop.WrapWithPostProcessor
 import top.wcpe.taboolib.ioc.bean.BeanPostProcessor
 import top.wcpe.taboolib.ioc.bean.BeanRegistry
 import top.wcpe.taboolib.ioc.bean.BeanScope
@@ -56,7 +57,12 @@ class LifecycleManager(
     private val singletonsInCreation = LinkedHashSet<String>()
 
     private val creationStack = ThreadLocal.withInitial { ArrayDeque<String>() }
-    private val beanPostProcessors = mutableListOf<BeanPostProcessor>()
+    /**
+     * 后处理器链。默认已包含**内置**的 [WrapWithPostProcessor]（`@WrapWith` 装饰器支持），
+     * 它由容器自身维护 —— 这样扫描路径（[BeanContainer]）与测试路径（`IocTestContext`）
+     * 语义天然一致，无需各自接线。
+     */
+    private val beanPostProcessors = mutableListOf<BeanPostProcessor>(WrapWithPostProcessor)
 
     fun addBeanPostProcessor(processor: BeanPostProcessor) {
         beanPostProcessors.add(processor)
@@ -298,6 +304,8 @@ class LifecycleManager(
         synchronized(singletonCreationLock) { singletonsInCreation.clear() }
         creationStack.remove()
         beanPostProcessors.clear()
+        // 内置处理器不随重置丢失，保证语义与首次初始化一致
+        beanPostProcessors.add(WrapWithPostProcessor)
         cycleResolver.clear()
     }
 

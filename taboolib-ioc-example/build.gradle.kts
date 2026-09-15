@@ -9,6 +9,10 @@ plugins {
 }
 
 
+taboolibIoc {
+    weaving(true)
+}
+
 taboolib {
     description {
         name("TaboolibIoCExamplePlugin")
@@ -29,6 +33,12 @@ taboolib {
 }
 
 dependencies {
+    // 生产依赖：显式指向本地 project，与 test-v1_12 / test-v1_20 保持一致。
+    // 不写这一行时插件会自动接管并注入 top.wcpe.taboolib.ioc:taboolib-ioc:<iocVersion>，
+    // 而 iocVersion 的兜底常量（DEFAULT_IOC_VERSION = 1.2.0-SNAPSHOT）不随本项目版本更新，
+    // 会导致本模块打包/起服 e2eSmoke 内嵌的是旧版 IoC，验证不到当前源码。
+    taboo(project(":taboolib-ioc"))
+
     // 测试依赖 - 直接引用 ioc-core 和 ioc-api 以访问容器内部 API
     testImplementation(project(":taboolib-ioc-core"))
     testImplementation(project(":taboolib-ioc-api"))
