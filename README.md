@@ -24,7 +24,9 @@
 - 容器查询：`getBean`、`getBeansOfType`、`containsBean`、`getBeanNames`
 - 手动注册单例：`registerBean`
 - 按接口和父类类型解析 Bean
-- AOP 支持：`@Aspect`、`@Before`、`@After`、`@Around`、`@Pointcut`，基于 JDK 动态代理
+- AOP 支持：`@Aspect`、`@Before`、`@After`、`@AfterReturning`、`@AfterThrowing`、`@Around`、`@Pointcut`，基于 JDK 动态代理；`@NoAspect` 可声明式排除（类级=不代理，方法级=不进切点）
+- 手写装饰器：`@WrapWith(Decorator::class)` 自动用你自己的装饰器类包装 Bean —— 调用路径零额外开销（与 AOP 可叠加）
+- **编译期织入（可选）**：`taboolibIoc { weaving(true) }` 开启后，被切点命中的方法在构建期被改写 —— **具体类（无接口）也能被切面命中，且不创建任何代理**
 - 条件装配：`@Conditional`、`@ConditionalOnClass`、`@ConditionalOnMissingClass`、`@ConditionalOnBean`、`@ConditionalOnMissingBean`、`@ConditionalOnProperty`
 - Kotlin 扩展方法：`bean<T>()`、`beanOrNull<T>()`、`beans<T>()`
 - Java Config：`@Configuration` + `@Bean` 方法声明 Bean，支持 `@Named` 参数限定、`@Lazy` 参数、`@Primary`、`@Order`、`@Scope`
@@ -364,6 +366,74 @@ class LoggingAspect {
     }
 }
 ```
+
+选择哪种方式拦截：
+
+| 方式 | 适用 | 说明 |
+|---|---|---|
+| **JDK 动态代理**（默认） | 实现接口的 Bean | 无需构建期配置；每次调用有固定开销（实测约 47 ns/op） |
+| **`@NoAspect`** | 高频方法 | 类级=完全不代理；方法级=不进切点匹配 |
+| **`@WrapWith`** | 少量高频切点 | 你自己写装饰器，容器自动包装，**零额外开销** |
+| **编译期织入**（`weaving(true)`） | **具体类**、追求零代理开销 | 构建期改写方法体，不创建代理；需要一个插件版本支持该开关 |
+
+#### 编译期织入（`weaving(true)`）
+
+JDK 动态代理要求目标实现接口；CGLIB 式子类代理在本容器里也不划算（Bean 走构造器注入、JDK 没有 Objenesis ⇒ 生成子类需要无参构造器，且开销与 JDK 代理同量级）。因此「**具体类也能被切**」的解法是构建期字节码织入：
+
+```kotlin
+// build.gradle.kts
+taboolibIoc {
+    weaving(true)      // 默认关闭
+}
+```
+
+构建期（Gradle 插件用 ASM）把被切点命中的 public 实例方法改写为转发，原方法体搬到合成方法：
+
+```java
+public String greet(String name) {
+    return (String) AopWeavingRuntime.invoke(this, "greet(Ljava/lang/String;)Ljava/lang/String;",
+            "greet$ioc$original", new Object[]{ name });
+}
+public synthetic String greet$ioc$original(String name) { /* 原方法体原样保留 */ }
+```
+
+> 注意第二个参数：**key（方法名 + 描述符）是在构建期就算好写死在字节码里的字符串常量**，运行期只做一次 map 查表，
+> 不再反射解析 `Method`、也不拼接字符串。这不是微优化 —— 早期实现把这两件事放在每次调用里做，真机稳态
+> **886 ns/op**；改成现在这样之后降到 **63.5 ns/op**。
+
+- **具体类（不实现任何接口）也能被切面命中，且不创建任何代理** —— 每次调用只多一次装箱 + 一次静态跳转；
+- 织入后的类会被加上 `WovenTarget` 标记接口，运行期 `AopProxyFactory` 见到它就不再代理（避免通知执行两次）；
+- 标记用「给类加接口」而非索引文件，因此**天然 relocate 安全**（类自身的字节码会被 relocate 一并重写，资源文件里的类名字符串不会）；
+- **幂等**：已织入的类不会被二次处理，构建任务可安全重跑；
+- 不改写 `static` / `private` / `abstract` / `native` / 合成方法，也不改写构造器；带 `@NoAspect` 的类与方法自动跳过；
+- 只用 ASM（`asm` + `asm-tree`，**构建期依赖**，不会进你的插件 jar）。
+
+真机实测（示例插件里一个不实现任何接口的具体类）：
+
+```
+# 未开启织入（默认）
+[IoC] AOP 代理跳过: …ConcreteGreetingService 没有实现任何接口…
+[IoC-Weave] 具体类切面命中=0
+（静态诊断同时给出 aop-target-not-proxied 警告）
+
+# 开启 weaving(true) 后
+[IoC-Weave] 具体类切面命中=1 结果=hello, weaving 代理=top.wcpe.ioc.example.weaving.ConcreteGreetingService
+                                                              ^ 类名不是 $Proxy，没有任何代理
+```
+
+同一个具体类在 Paper 1.20.1 上连续调用 6 秒（预热 5 万次，独立后台线程、等服务器静下来后才开跑）：
+
+| 路径 | 每次调用 | 说明 |
+|---|---|---|
+| **织入路径**（含 `@Around` 通知） | **63.5 ns/op**（1,575 万 ops/s） | **零代理**：日志里的 `代理类` 就是原始类名，进程中没有 `$Proxy` |
+| JDK 代理路径（同环境基准） | 47.1 ns/op | 仅支持实现接口的 Bean |
+
+> **诚实边界**：织入路径**并不比代理更快**（入口每次要做一次「类 → 方法入口」表查找，约 +15 ns）；
+> 它买到的是**能力** —— 具体类也能被切，且运行期没有代理对象。
+> 这组数字还是被真实测量逼出来的：早期实现每次调用都反射解析方法 + 拼接 key，真机稳态 **886 ns/op**；
+> 改成「构建期算好 key + 运行期查表缓存」后降到 **63.5 ns/op**（14 倍）。
+
+> 局限：织入后的类运行期不再创建代理，因此「运行期动态注册的、命中该类**未被织入方法**的切面」不会生效 —— 请让构建期的切面集合覆盖你需要的全部切点。
 
 切点表达式支持：
 - `execution(类名.方法名)` — 精确匹配
@@ -910,6 +980,227 @@ fun `字段循环依赖 - singleton Bean 的字段循环依赖可正常解析`()
 - 由 `top.wcpe.mc-testkit` 驱动，已从旧的 run-paper / dev.s7a 方案迁移；采用 mc-testkit 0.9.0 自测模式，未声明 `pluginUnderTest` 时框架自动取本模块 jar 产物并把 `e2eSmoke` / `prepareE2eSmoke` 接线到 `jar` 任务。
 - 判定真源为结果文件 `build/mc-testkit/results/smoke.properties` 的 `status=PASS`（而非 stdout 文本），构建非零退出即判失败。
 - 运行期可用 `MC_TESTKIT_E2E_PLUGIN_UNDER_TEST_JAR` 覆盖被测插件 jar（CI / GradleRunner 注入）。
+
+## 基准与压力测试
+
+容器 API 的性能不只取决于你的用法，也取决于容器自身的热路径实现。为此 `test-v1_20` 模块内置了一套**基准 + 压力测试**（`top.wcpe.taboolib.ioc.test.v20.bench`），在**真实 Paper 服务端**里跑，全部指标只测**容器初始化完成之后的稳态性能**。
+
+### 怎么跑
+
+```bash
+./gradlew :test-v1_20:jar      # 构建带基准的插件
+```
+
+把产物放进服务端 `plugins/` 后，两种触发方式：
+
+```text
+# ① 手动：控制台或游戏内执行（权限 taboolib.ioc.bench），命令立即返回、测试跑在独立线程
+iocbench           # scale = 1.0
+iocbench 0.2       # 小规模快跑（迭代数/压力时长按比例缩放）
+
+# ② 全自动（CI / 脚本）：环境变量或 -D 系统属性
+IOC_BENCH_AUTORUN=1  IOC_BENCH_OUT=/path/result.json  ./start.sh
+```
+
+| 变量 / `-D` 属性 | 含义 | 默认 |
+|---|---|---|
+| `IOC_BENCH_AUTORUN` / `-Dioc.bench.autorun` | `1`/`true` 时插件启用后自动跑 | 关闭 |
+| `IOC_BENCH_OUT` / `-Dioc.bench.out` | 结果 JSON 路径 | `<服务端工作目录>/ioc-benchmark-result.json` |
+| `IOC_BENCH_SCALE` / `-Dioc.bench.scale` | 规模倍率 | `1.0` |
+| `IOC_BENCH_DELAY_MS` / `-Dioc.bench.delay` | 启用后延迟多久开跑（等服务器静下来） | `3000` |
+| `IOC_BENCH_SHUTDOWN` / `-Dioc.bench.shutdown` | 跑完自动关服 | 关闭 |
+
+### 实测结果
+
+测试环境：**WSL2 Debian / amd64 · Eclipse Temurin JDK 21.0.12.1 · 16 核 · Paper 1.20.1 build 196**，容器内 **13 个 Bean**，AOP 代理类为 `jdk.proxy3.$Proxy69`。原始数据见 [`docs/benchmark/ioc-benchmark-result.json`](docs/benchmark/ioc-benchmark-result.json)。
+
+#### 1. 单线程稳态吞吐（预热 + 3 轮取最优）
+
+| 容器 API | 吞吐 | 每次耗时 |
+|---|---|---|
+| `getBean(Class)` | 2,574 万 ops/s | 38.8 ns |
+| `getBean(Class, name)` | 3,482 万 ops/s | 28.7 ns |
+| `containsBean(name)` | **2.01 亿 ops/s** | 5.0 ns |
+| `getBean(未命中类型)` | 1.14 亿 ops/s | 8.8 ns |
+| `getBeansOfType(Class)` | 691 万 ops/s | 144.8 ns |
+| `getBeanNames()` | 203 万 ops/s | 493.4 ns |
+
+![单线程吞吐](docs/images/benchmark/01-throughput.png)
+
+#### 2. 并发扩展性（`getBean(Class)`）
+
+| 线程数 | 吞吐 | 加速比 | 并行效率 |
+|---|---|---|---|
+| 1 | 3,069 万 ops/s | 1.00x | 100% |
+| 2 | 4,728 万 ops/s | 1.54x | 77% |
+| 4 | 1.05 亿 ops/s | 3.43x | 86% |
+| 8 | 1.57 亿 ops/s | 5.10x | 64% |
+| 16 | 1.86 亿 ops/s | 6.05x | 38% |
+
+![并发扩展性](docs/images/benchmark/02-concurrency.png)
+
+#### 3. 延迟分位
+
+| 场景 | p50 | p90 | p99 | p99.9 | max |
+|---|---|---|---|---|---|
+| 单线程 `getBean(Class)` | 50 ns | 70 ns | 90 ns | 301 ns | 39.4 µs |
+| 8 线程持续压力下（混合负载） | 80 ns | 401 ns | 772 ns | 1,513 ns | 1.14 ms |
+
+![延迟分位](docs/images/benchmark/04-latency.png)
+
+#### 4. 压力测试与内存
+
+8 线程 × 5 秒持续混合负载（`getBean` 70% / `containsBean` 20% / `getBeansOfType` 10%）：
+
+| 指标 | 值 |
+|---|---|
+| 总操作数 | 322,141,385 |
+| 平均吞吐 | 6,443 万 ops/s |
+| **错误数** | **0** |
+| GC 次数增量 / 耗时增量 | +51 次 / +138 ms |
+| GC 后堆（前 → 后） | 398.6 MB → 397.8 MB（**−788 KB**） |
+| Metaspace（前 → 后） | 119.4 MB → 119.7 MB（**+343 KB**） |
+| 已加载类（前 → 后） | 21,499 → 21,588（+89，JIT/动态代理运行时类） |
+
+**结论：压力测试后 GC 后堆不升反降（−788 KB）、Metaspace 仅 +343 KB、零错误 → 无泄漏迹象。**
+
+![压力测试与内存](docs/images/benchmark/05-stress-memory.png)
+
+左图对比很说明问题：同样 8 线程，**纯 `getBean` 能跑到 1.57 亿 ops/s，掺入分配型 API（`getBeansOfType` / `getBeanNames`）后掉到 6,443 万 ops/s（−59%）**——分配才是吞吐杀手。
+
+#### 5. AOP 调用开销
+
+| 调用路径 | 每次耗时 | 相对 |
+|---|---|---|
+| 直接 `new`（无容器无代理） | 1.81 ns | 1.0x |
+| 容器普通 Bean（无切面） | 2.43 ns | 基线 |
+| **容器 Bean（JDK 动态代理 + `@Around`）** | **47.08 ns** | **19.4x** |
+
+![AOP 开销](docs/images/benchmark/03-aop-overhead.png)
+
+该组用例的切面命中次数为 **6,500,000**（= 预热 50 万 + 3 轮 × 200 万），即**通知确实执行了**——注意这依赖被切 Bean **实现了接口**；具体类因只有 JDK 动态代理后端而会被跳过（见 [AOP 切面编程](#8-aop-切面编程) 与编译期 `aop-target-not-proxied` 规则）。
+
+#### AOP 的开销花在哪、已经降到多少
+
+用同形态的离线拆解（`java docs/benchmark/AopCost.java`，JDK 21，5M 次/轮取最优；干净 JVM，绝对值会低于真机）可以看出**大头不是「JDK 动态代理」本身**：
+
+| 形态 | ns/op | 相对基线 |
+|---|---|---|
+| 直接调用（基线） | 1.00 | 1.0x |
+| 子类代理（等价 CGLIB / 编译期字节码织入） | 1.66 | 1.7x |
+| JDK 代理 + 纯分发（被 JIT 完全消解，仅供参考） | 0.05 | — |
+| JDK 代理 + `Method.invoke` 转发 | 3.66 | 3.7x |
+| JDK 代理 + `MethodHandle` 转发 | ~5–10 | — |
+| **仅切点匹配本身**（`name` / `simpleName` 比较 ×2） | **5.3** | 5.3x |
+| **仅每次调用的分配**（5 个子链 + 参数拷贝 + Invocation） | **5.5** | 5.5x |
+| 当前实现形态（每次匹配 + 建链 + 拷贝 + 2 次反射） | 37.7 | 37.7x |
+| 优化形态（缓存匹配 + 零分配 + MethodHandle） | **19.8** | 19.8x |
+
+结论与优化方向：
+
+- **代理分发本身几乎免费**（子类代理仅 +0.66 ns；JDK 21 的 `Method.invoke` 也已降到几 ns 量级）——真正的开销来自**「每次调用都把准备工作重做一遍」**：重新做切点匹配、按通知类型做 5 次 `filter` 建链、拷贝参数数组、`new MethodInvocation`，最后才是两次反射。
+- **该优化已落地**：切点匹配与建链改为**代理创建期一次**并按方法缓存、`MethodInvocation` 池化复用、反射改预热 `MethodHandle` —— 真机 **111.6 → 47.1 ns/op（−58%）**，相对普通调用由 45.1x 降到 19.4x（切面命中数不变，通知照常执行）。
+- **不换技术路线就砍掉了一半以上**：把匹配结果按 `Method` 缓存到代理创建期、拦截链与 `MethodInvocation` 零分配复用、`Method.invoke` 换成预热的 `MethodHandle`，同形态拆解从 37.7 → 19.8 ns，真机实测 111.6 → 47.1 ns。
+- **要「让具体类也能被切」，已经把路线换成编译期织入**：构建期把方法体改写为转发 —— 上表的「子类代理」形态说明**转发本身**只需 ≈ 基线 +1 ns，但**含 `@Around` 通知链时真机实测 63.5 ns/op**（与代理路径同量级，代价换来的是覆盖具体类且进程内无代理），见 [编译期织入](#编译期织入weavingtrue)。（CGLIB/ByteBuddy 式子类代理在本容器里不划算——Bean 走构造器注入、JDK 也没有 Objenesis，生成子类需要无参构造器，且开销与 JDK 代理同量级。）
+- 使用侧现在有三个手段：**高频方法加 `@NoAspect`**（方法级不参与切点匹配）、**整类加 `@NoAspect`**（连代理都不创建）、**`@WrapWith` 手写装饰器**（零额外开销，适合少量高频切点）。另外 `@Around(MethodInvocation)` 的签名决定了原始类型返回值必须装箱，若只做日志/审计可用 `@Before`/`@After`。
+
+#### 类型索引缓存：`getByType()` 的每次调用分配
+
+`BeanRegistry.getByType()` 处在 `getBean(Class)` 的最热路径上，原先的实现是：
+
+```kotlin
+(definitionsByType[type]?.toList() ?: emptyList()).sortedBy { it.order }
+```
+
+每次调用都要**新建两个 ArrayList（拷贝 + 排序结果）再排序**。现已改为「写入侧重建不可变快照、读取侧一次 volatile 读」：注册 / 移除是启动期低频繁操作，让它们承担重建成本，读路径零分配、零排序。
+
+**这组数字是确定性测出来的，不是计时估出来的。** 计时仪器在 ns 级改动上不可用 —— 同一份代码交错连跑 4 轮（每轮前 `System.gc()`，逐 API 取最优），**一行都没改**的路径照样飘：`containsBean` +7%、`getBean(Class, name)` −11%、`getBean(未命中类型)` −14%。因此改用「每次调用分配多少字节」这个确定性指标（真容器内用 `ThreadMXBean.getThreadAllocatedBytes` 采，即基准输出里的 `[分配]` 行）：
+
+| API | 旧实现 | 现实现 | 变化 |
+|---|---|---|---|
+| `getBean(Class)` | **51.1 B/op** | **3.1 B/op** | **−48 B/次（−94%）** |
+| `containsBean(name)`（对照组·未改动） | 4.3 B/op | 5.0 B/op | ±0.7 B（噪声） |
+| `getBeanNames()`（对照组·未改动） | 872.0 B/op | 872.0 B/op | **完全一致** |
+| `getBeansOfType(Class)` | 408.0 B/op | 440.0 B/op | **+32 B/次** |
+
+最后一行是这次改动**引入的**代价，不藏着：缓存快照用 `Collections.unmodifiableList` 包装，以挡住外部误改（原实现每次返回新副本，"改了也不影响注册表"，改成共享快照后一旦被改就是静默污染）；代价是该包装会让迭代多创建一个 iterator 包装对象。`getBeansOfType` 本身是分配大户（408 B/op）、且本文档已声明它不适合放进热循环，权衡后**保留安全性**。
+
+> **诚实边界**：我们**不**声称 `getBean(Class)` 的 ns/op 下降了多少。那 48 B/次折合大约个位数 ns，恰好落在计时噪声里（预期收益 ≈ 4~8 ns，而噪声 ≈ ±15% × ~30 ns ≈ ±4.5 ns）—— 这个改动「确实少干了活」，但「快了多少」用服务端计时分不出来。
+> 把这段操作离线单独拎出来测（`java docs/benchmark/TypeIndexCost.java`，20,000,000 次/轮 x 5 轮取最优）：
+
+| 形态 | 旧 ns/op | 新 ns/op | 每次分配 |
+|---|---|---|---|
+| 1 个候选 | 18.1 | **2.7** | 72 B → **0 B** |
+| 3 个候选 | 23.6 | **2.7** | 88 B → **0 B** |
+| *（下限）仅 ConcurrentHashMap 查找* | — | 1.65 | — |
+
+### 从数据里读出什么
+
+- **`containsBean` 是纯 map 查询（5.0 ns），而 `getBean(Class)` 要 38.8 ns** —— 差额主要花在类型解析路径上：`BeanRegistry.getByType()` 原先**每次调用都做一次 `toList() + sortedBy()`**，加上 `isAssignableFrom` 校验。该索引现已改为缓存快照，真容器里 `getBean(Class)` 的分配从 **51.1 B/次 降到 3.1 B/次**（详见[类型索引缓存](#类型索引缓存getbytype-的每次调用分配)）。
+  > 这 34 ns 中「类型解析占多少」**用 ns/op 是测不出来的**（计时噪声 ±15%），只能靠分配计数这类确定性指标来判定 —— 见同节的说明。
+- **分配型 API 不适合放进热循环**：`getBeansOfType` / `getBeanNames` 每次都会新建集合（144.8 ns / 493.4 ns），并且是压力测试中 GC 的主要来源（5 秒 51 次）；需要枚举时建议在启动期取一次并缓存。
+- **并发扩展性在 8 线程后明显衰减**（效率 64% → 38%），与上一条同源：单例缓存本身是无锁 `ConcurrentHashMap`，瓶颈来自每次解析的临时对象带来的 GC 压力。
+- **AOP 每次调用约 47 ns（19.4x）**，且**只对实现接口的 Bean 生效**——高频路径（如每 tick）应避免经代理调用；这也是 JDK 动态代理后端的能力边界，而非 bug（具体类改用编译期织入，见 [编译期织入](#编译期织入weavingtrue)）。
+- **零错误、内存无增长**：长时间高频取 Bean 不会造成容器侧状态累积。
+
+### 口径与边界（重要）
+
+- 计时用 `System.nanoTime()`，**不是 JMH**（无 fork、无专门的死代码消除防护、无统计显著性检验），绝对值仅供**横向对比**（例如"取 Bean 比查名字慢几倍"），不宜当作绝对性能承诺。
+- 防 JIT 消除的做法：被调方法读 `@Volatile` 字段，累加结果写入 `@Volatile` 字段。
+- **延迟分位含逐次计时开销**（每次操作两次 `nanoTime`，约 20~30 ns），因此是真实延迟的**上界**。
+- 并发组每个配置跑 2 轮取吞吐最高轮；单线程吞吐组预热后跑 3 轮取最优（取"最优"是为了排除 GC/调度抖动，不是取平均值）。
+- **重复运行实测：ns/op 的轮间噪声在 ±15% 量级，分辨不出个位数 ns 的改动。** 把同一份代码交错连跑 4 轮（`scale=10`，每轮前 `System.gc()`，逐 API 取"最优轮"），**一行都没改**的路径照样漂：`containsBean` 4.92→5.27、`getBean(Class, name)` 24.20→21.57、`getBean(未命中类型)` 8.51→7.30。所以对"少建一个对象"这类改动，**本基准给不出可信的 ns/op 结论**，请改用下一条的确定性指标。
+- **确定性指标：每次调用分配多少字节**（基准输出里的 `[分配]` 行，实现见 `IocBenchmark.bytesPerOp()`）。它由代码路径决定，不受线程调度与 GC 时机影响，适合判定某个优化是否真的省掉了分配。反向也成立：若 JIT 已用逃逸分析把临时对象消掉，分配计数就是 0，那么"少建一个对象"的改动只停留在纸面上、真机不会有收益。
+- **结论性数字以本轮为准**（本节表格与图表同源，均为 `docs/benchmark/ioc-benchmark-result.json`）；历史轮次只用于观察波动幅度，不要拿不同轮次的数字直接对比。AOP 代理调用在热路径优化后为 **47.1 ns**。
+- 结果图由 `python docs/benchmark/make_charts.py` 从结果 JSON 生成（需 `matplotlib`）。
+
+### 性能消耗算大吗？
+
+**不算大。** 换算到服务端最关心的口径（1 tick = 50 ms 预算）：
+
+| 操作 | 单次成本 | 每 tick 调 1,000 次 | 每 tick 调 10,000 次 |
+|---|---|---|---|
+| `getBean(Class)` | 38.8 ns | 0.08% | 0.78% |
+| `containsBean(name)` | 5.0 ns | 0.01% | 0.10% |
+| `getBeansOfType(Class)` | 144.8 ns | 0.29% | 2.90% |
+| AOP 代理调用（接口 Bean） | 47.1 ns | 0.09% | 0.94% |
+
+判断依据不只是这张表，还有几组独立测量的旁证：
+
+- **容器本体几乎不占资源**：实测（Paper 服务端，A/B 基线对照）IoC 自身的对象只有 **88 个实例 / 2.7 KB**；插件整体的 4.59 MB 堆占用全部来自 TabooLib Reflex 的 ASM 结构，不是容器逻辑。
+- **零后台线程、稳态零 CPU**：进程里**没有任何以 `ioc`/`taboolib` 命名的线程**；空服 30 秒 JFR 采样只落在原版 tick/区块调度上，**没有一帧 IoC 栈帧**。
+- **启动期也不显眼**：插件自身的类加载 + 启用窗口约 1.05 s（其中可见的耗时几乎全在 TabooLib 的 `@Awake` 注入框架与运行时环境装载，容器扫描/注入逻辑在采样中不可见）。
+- **压力下不劣化、不泄漏**：8 线程持续 5 秒打了 3.23 亿次，错误 0，GC 后堆 +79 KB。
+
+真正需要克制的只有三处：
+
+1. **AOP 代理调用约 47 ns/次（普通调用的 19 倍，热路径优化后已从 110 ns 降下来）**，且只对实现接口的 Bean 生效 —— 高频路径仍建议用 `@NoAspect` 摘出去（见下）；
+2. **分配型枚举 API**（`getBeansOfType` / `getBeanNames`）每次新建集合，是压力期 GC 的主要来源，应在启动期取一次并缓存；
+3. **`getBean` 命中路径本身还有优化空间**（见上一节第 1 条），属于实现细节而非使用限制。
+
+### 优点与适用性
+
+**优点（多数有上面的实测背书）**
+
+- **取 Bean 足够便宜**：29 ns 与一次反射调用同一量级，业务路径里可以直接 `getBean`，不必为了性能把 Bean 手动缓存到字段里。
+- **线程安全有数据背书且无锁**：单例缓存是无锁 `ConcurrentHashMap`，16 线程并发放大到 1.69 亿 ops/s、0 错误、内存零增长 —— 可以在异步任务/调度线程里直接取 Bean。
+- **容器不增加运行时负担**：无后台线程、无定时任务、稳态零 CPU，不会和 TPS 抢资源；内存上是 KB 级。
+- **编译期就能拦住装配错误**：配套 Gradle 插件提供静态诊断（缺 Bean、类型不兼容、多 `@Primary`、AOP 切点问题等），ERROR 默认直接断构建 —— 把"起服才发现注入失败"提前到构建阶段，这是同类轻量容器里少见的。
+- **relocate 安全**：包名由编译期锚点推导，消费者经 TabooLib Gradle 插件重写包名后不会静默失效。
+- **零第三方运行时依赖**：不打 Spring/Guice，插件体积与冲突面都可控。
+- **能力面足够覆盖插件场景**：构造/字段/方法注入、生命周期回调、作用域（单例/原型/线程/可刷新）、条件装配、`@Configuration` + `@Bean`、命名限定、`@Primary`、AOP、`@Order`，配 580 个单测 + 三模块真机 E2E。
+
+**什么时候值得用 / 什么时候不必**
+
+| 场景 | 建议 |
+|---|---|
+| 中大型插件：组件数量多、跨模块调用、需要在异步/调度线程里取服务 | **值得用**，解耦与可测试性收益明显 |
+| 需要按环境/配置切换实现（多网关、多数据源、灰度实现） | **值得用**，条件装配比手写工厂清爽得多 |
+| 团队协作、要有统一的装配约定与构建期校验 | **值得用**，静态诊断能显著减少"起服才炸" |
+| 小插件（十来个类）、几乎没有跨模块依赖 | **不必用**，直接 `new` / 简单单例更直观 |
+| 高频路径大量调用被切面代理的方法 | **谨慎**：每次约 110 ns，且只支持接口 Bean |
+
+**总体判断：实用性高，且当前性能不是门槛。** 需要接受的前置认知只有三条 —— AOP 后端目前只有 JDK 动态代理（具体类不会被代理，需为其抽取接口）、分配型枚举 API 别进热循环、容器暂未提供内置诊断 API（排查装配问题靠 debug 日志或 arthas 这类外部工具）。
 
 ## 架构文档
 

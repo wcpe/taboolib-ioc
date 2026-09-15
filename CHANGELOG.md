@@ -5,6 +5,45 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **编译期 AOP 织入（可选，默认关闭）**：配套 Gradle 插件新增 `taboolibIoc { weaving(true) }` 开关与 `weaveTaboolibIocAop` 任务（挂在 `jar` / `assemble` / `build` / `taboolibMainTask` 之前）。开启后被切点命中的 public 实例方法在**构建期**被改写为转发到 `AopWeavingRuntime`，原方法体搬到合成方法 `xxx$ioc$original`：
+  - **具体类（不实现任何接口）也能被切面命中，且不创建任何代理** —— 每次调用只多一次装箱 + 一次静态跳转；
+  - 织入后的类被加上 `WovenTarget` 标记接口（**relocate 安全**：类自身字节码会被 relocate 一并重写，资源文件里的类名不会），运行期 `AopProxyFactory` 见到它即跳过代理，避免通知执行两次；
+  - 幂等（已织入的类不再处理）；不改写 `static` / `private` / `abstract` / `native` / 合成方法，也不改写构造器；`@NoAspect` 的类与方法跳过；
+  - **运行期入口零反射**：woven 方法传的 key（**方法名 + 描述符**）在**构建期**算好，运行期按 `ClassValue<Map<key, 入口>>` 查表缓存（入口含预热通知链），不再每次调用反射解析方法或拼接字符串 —— 实测该缺陷会让真机稳态从 63.5 ns/op 劣化到 886 ns/op；
+  - 只用 ASM（`asm` + `asm-tree`，**构建期依赖**，不进消费者插件 jar）；
+  - 真机验证：示例插件中一个不实现接口的具体类，未开启时 `切面命中=0` + `AOP 代理跳过` 日志，开启后 `切面命中=1` 且对象类名不是 `$Proxy`。
+- 运行期新增 `AopWeavingRuntime`（织入入口）、`WovenTarget`（标记接口）、`AopExclusions`（`@NoAspect` 判定的单一实现，代理与织入共用）、`AopPlans`（通知链构建，代理与织入共用）。
+- **`@NoAspect`**：声明式排除 AOP。标注在类上 → 该 Bean 完全不创建代理（零额外开销）；标注在方法上 → 该方法不参与切点匹配（接口方法与实现方法都会检查）。用于把每 tick / 高频调用的方法从切面里摘出去。
+- **`@WrapWith`**：用手写装饰器包装 Bean（零运行期开销的组合方式）。容器在 `@PostConstruct` 之后、AOP 代理之前把实例换成装饰器；调用路径上没有任何额外开销，适合少量高频切点。
+- `test-v1_20` 内置**基准与压力测试套件**（`top.wcpe.taboolib.ioc.test.v20.bench`）：单线程吞吐、并发扩展性（1/2/4/8/16 线程）、延迟分位、8 线程持续压力、压力前后内存对比、AOP 三条调用路径开销对比。支持 `/iocbench [scale]` 命令触发，也支持 `IOC_BENCH_AUTORUN` / `IOC_BENCH_OUT` / `IOC_BENCH_SCALE` / `IOC_BENCH_SHUTDOWN` 等环境变量（或同名 `-Dioc.bench.*` 属性）全自动运行，结果写 JSON 便于出图
+- README 新增「基准与压力测试」章节：实测数据表、五张图表、口径与边界说明；图表由 `docs/benchmark/make_charts.py` 从结果 JSON 生成。另附 `docs/benchmark/AopCost.java`（零依赖单文件微基准，拆解 AOP 调用开销）
+
+### 性能
+
+- **AOP 热路径优化**（真机实测代理调用 **111.6 → 47.1 ns/op，−58%**；相对普通调用从 45.1x 降到 19.4x）：
+  - 切点匹配与「按通知类型建链」从**每次调用**改为**代理创建期一次**，按方法缓存 `AopPlan`；
+  - 切面注册表新增版本号，运行期新注册切面（手动注册路径）会让缓存自动失效重建，语义不变；
+  - `MethodInvocation` 改为线程局部**池化复用**（嵌套调用各自取实例），热路径不再每次都分配；
+  - 通知与目标方法调用改用预热的 `MethodHandle`，无法 unreflect 时自动回退 `Method.invoke`（行为与旧实现一致）；
+  - 未被切点命中的方法在代理上也有预热直达路径。
+- **类型索引缓存**（`BeanRegistry.getByType()`，真容器实测每次调用分配 **51.1 B → 3.1 B，−94%**）：
+  - 原先每次调用都 `toList() + sortedBy { it.order }`（新建两个 ArrayList 再排序）；现改为**写入侧重建不可变快照、读取侧一次 volatile 读** —— 注册 / 移除是启动期低频繁操作，由它们承担重建成本，读路径零分配零排序；
+  - 缓存失效用「同一把锁同时保护定义列表与快照」实现：若只在写入侧加锁，读者可能在变更后把过期快照写进缓存并永久留下；
+  - `getPrimaryByType` 的多候选分支由 `filter { it.isPrimary }` 改为内联扫描，仅在真的存在第二个 `@Primary` 时才回到 filter 去拼报错信息；
+  - 快照用 `Collections.unmodifiableList` 包装以挡住外部误改（原实现每次返回新副本，改成共享快照后一旦被改就是静默污染）；代价是枚举型 API 迭代时多创建一个 iterator 包装对象，`getBeansOfType` 因此 +32 B/op —— 该类 API 本就是分配大户且已声明不适合热循环，故保留安全性；
+  - **不宣称 ns/op 收益**：48 B/次折合约个位数 ns，落在本基准 ±15% 的轮间噪声内（同一份代码交错 4 轮，未改动路径也会飘 ±7~14%）。离线单独测量（`docs/benchmark/TypeIndexCost.java`）为 18.1→2.7 ns/op（1 候选）、23.6→2.7 ns/op（3 候选）；
+  - 基准套件新增**确定性指标「每次调用分配字节数」**（`bytesPerOp()`，用 `ThreadMXBean.getThreadAllocatedBytes`）：不受调度 / GC 时机影响，用于判定优化是否真的省掉了分配，也能识别「临时对象已被逃逸分析消除、改动只停留在纸面上」的情形。
+
+### 变更
+
+- `MethodInvocation` 由 `final` 改为 `open`、属性改为可写（**源码与二进制兼容**，构造签名与字段描述符不变），以支持容器内部的零分配复用
+- `InterceptorChain` 标记 `@Deprecated`：逻辑已被 `AopPlan` 取代（不再被容器使用，保留以兼容直接引用它的外部代码）
+- 内置 `BeanPostProcessor`（`@WrapWith`）由 `LifecycleManager` 自身持有，扫描路径与 `IocTestContext` 路径语义一致
+
 ## [1.3.0] - 2026-09-13
 
 ### 新增
